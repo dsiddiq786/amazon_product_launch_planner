@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Launch Planner</title>
+    <link rel="stylesheet" href="css/tailwind.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <div class="container">
+        <!-- Auth Section -->
+        <div id="authSection" class="hidden">
+            <div class="card p-6 space-y-4">
+                <h2 class="text-center">Welcome Back</h2>
+                <form id="loginForm" class="space-y-4">
+                    <div>
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" placeholder="Enter your email" required>
+                    </div>
+                    <div>
+                        <label for="password">Password</label>
+                        <input type="password" id="password" placeholder="Enter your password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-full">Sign In</button>
+                </form>
+                <div id="loginMessage" class="status-message hidden"></div>
+            </div>
+        </div>
+
+        <!-- Main Section -->
+        <div id="mainSection" class="hidden">
+            <!-- User Info -->
+            <div class="user-info">
+                <div class="flex items-center space-x-3">
+                    <div id="userAvatar" class="user-avatar"></div>
+                    <span id="userEmail" class="text-sm font-medium"></span>
+                </div>
+                <button id="logoutBtn" class="btn btn-secondary">Logout</button>
+            </div>
+
+            <!-- Project Section -->
+            <div class="card p-4 mb-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h3>Select Project</h3>
+                    <button id="createProjectBtn" class="btn btn-primary">New Project</button>
+                </div>
+                <select id="projectSelect" class="mb-4">
+                    <option value="">Select a project</option>
+                </select>
+            </div>
+
+            <!-- New Project Form -->
+            <div id="newProjectForm" class="card p-4 mb-4 hidden">
+                <h3 class="mb-4">Create New Project</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label for="projectName">Project Name</label>
+                        <input type="text" id="projectName" placeholder="Enter project name">
+                    </div>
+                    <div>
+                        <label for="projectCategory">Category</label>
+                        <input type="text" id="projectCategory" placeholder="Enter category">
+                    </div>
+                    <div>
+                        <label for="projectSubcategory">Subcategory</label>
+                        <input type="text" id="projectSubcategory" placeholder="Enter subcategory">
+                    </div>
+                    <div class="flex justify-end space-x-2">
+                        <button id="cancelProjectBtn" class="btn btn-secondary">Cancel</button>
+                        <button id="saveProjectBtn" class="btn btn-primary">Create Project</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product Section -->
+            <div id="productSection" class="hidden">
+                <!-- Not Product Page Message -->
+                <div id="notProductPage" class="card p-4 mb-4">
+                    <p class="text-center text-gray-600">Please navigate to an Amazon product page to start scraping.</p>
+                </div>
+
+                <!-- Product Page Content -->
+                <div id="productPage" class="hidden">
+                    <div class="card p-4 mb-4">
+                        <button id="scrapeBtn" class="btn btn-primary w-full">
+                            Scrape Product Data
+                        </button>
+                    </div>
+
+                    <!-- Current Product Info -->
+                    <div id="productInfo" class="card hidden">
+                        <div class="product-info">
+                            <img id="productImage" class="product-image" src="" alt="Product Image">
+                            <div class="product-details">
+                                <h4 id="productTitle" class="product-title"></h4>
+                                <div class="product-meta space-y-1">
+                                    <p id="productBrand"></p>
+                                    <p id="productPrice"></p>
+                                    <p id="productAsin"></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status Message -->
+                    <div id="statusMessage" class="status-message hidden"></div>
+
+                    <!-- Scraped Products List -->
+                    <div id="scrapedProductsList" class="card">
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Image</th>
+                                        <th>Basic Info</th>
+                                        <th>Rankings</th>
+                                        <th>Description</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="productsTableBody">
+                                    <!-- Products will be dynamically inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="table-footer">
+                            <div class="bulk-actions">
+                                <button id="saveAllBtn" class="action-btn save-btn">Save All</button>
+                                <button id="clearScrapedDataBtn" class="action-btn remove-btn">Clear All</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html> 
