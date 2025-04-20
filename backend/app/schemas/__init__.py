@@ -15,7 +15,7 @@ from app.schemas.auth import (
     Token, TokenPayload, Login, EmailRequest, PasswordReset
 )
 from app.schemas.mongodb_models import (
-    MongoBaseModel, ScrapedProduct, Prompt, PromptInput, Recipe, Log, AnalysisTask
+    MongoBaseModel, ScrapedProduct, PromptBlock, PromptBlockInput, Recipe, AnalysisResult, AnalysisTask
 )
 
 __all__ = [
@@ -36,5 +36,5 @@ __all__ = [
     "Token", "TokenPayload", "Login", "EmailRequest", "PasswordReset",
     
     # MongoDB schemas
-    "MongoBaseModel", "ScrapedProduct", "Prompt", "PromptInput", "Recipe", "Log", "AnalysisTask"
+    "MongoBaseModel", "ScrapedProduct", "PromptBlock", "PromptBlockInput", "Recipe", "AnalysisResult", "AnalysisTask"
 ] 

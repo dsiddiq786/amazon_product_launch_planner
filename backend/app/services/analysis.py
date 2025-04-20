@@ -1,278 +1,505 @@
+"""
+Dawood's Code
+
+"""
+import asyncio
 import logging
 import uuid
-import json
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from app.database.mongodb import get_collection, MongoDBCollections
-from app.utils.gemini import get_gemini_response, get_prompts_by_category
+from app.utils.gemini import use_stored_prompt
+from app.config.settings import settings
+from app.utils.gemini import get_gemini_response
 
 logger = logging.getLogger(__name__)
 
-RECIPE_GENERATION_THRESHOLD = 10
+# ========== In-Memory Structures ==========
 
+category_queues: Dict[str, List[str]] = {}
+category_locks: Dict[str, asyncio.Lock] = {}
 
-def get_default_recipe_prompt(prompt_type: str) -> Dict[str, str]:
-    """
-    Fallback prompt generator if no saved prompt exists in DB.
-    """
-    if prompt_type == "product_recipe":
-        return {
-            "id": "default-product-recipe",
-            "content": "Given the product data and the analysis results, generate a clear, actionable success recipe highlighting key strengths and strategies for success."
+def get_category_key(main: str, sub: str) -> str:
+    return f"{main}>{sub}"
+
+# ========== STEP 1: Analyze Product ==========
+
+async def analyze_product(product_id: str, user_id: str) -> Dict[str, Any]:
+    products = get_collection(MongoDBCollections.PRODUCTS)
+    prompts = get_collection(MongoDBCollections.PROMPTS)
+    analysis = get_collection(MongoDBCollections.ANALYSIS)
+
+    product = await products.find_one({"id": product_id})
+    if not product:
+        raise ValueError("Product not found")
+
+    category_hierarchy = product.get("category_hierarchy", {})
+    main_category = category_hierarchy.get("main_category")
+    sub_categories = category_hierarchy.get("sub_categories", [])
+    if not main_category or not sub_categories:
+        raise ValueError("Category hierarchy incomplete")
+
+    subcategory = sub_categories[-1]
+    category_key = get_category_key(main_category, subcategory)
+
+    if category_key not in category_locks:
+        category_locks[category_key] = asyncio.Lock()
+
+    active_blocks = await prompts.find({
+        "is_active": True,
+        "prompt_category": "competitor_analysis"
+    }).to_list(length=100)
+
+    input_data = {
+        "product_data": {
+            "title": product.get("title"),
+            "description": product.get("description"),
+            "price": product.get("price"),
+            "features": product.get("features"),
+            "rating": product.get("rating"),
+            "review_count": product.get("review_count"),
+            "category": category_hierarchy
         }
-    elif prompt_type == "category_recipe":
-        return {
-            "id": "default-category-recipe",
-            "content": "You are given a list of successful product recipes within a specific category and subcategory. Summarize common winning strategies, patterns, and recommendations in a single master recipe."
-        }
-    else:
-        raise ValueError(f"Unsupported prompt type: {prompt_type}")
-    
+    }
 
-def format_prompt(template: str, input_data: Dict[str, Any]) -> str:
-    # Simple recursive string formatter
-    return template.replace("{{ product_data }}", json.dumps(input_data.get("product_data", ""), indent=2)) \
-                   .replace("{{ analyses }}", json.dumps(input_data.get("analyses", ""), indent=2)) \
-                   .replace("{{ product_success_recipes }}", json.dumps(input_data.get("product_success_recipes", ""), indent=2)) \
-                   .replace("{{ category }}", input_data.get("category", "")) \
-                   .replace("{{ subcategory }}", input_data.get("subcategory", ""))
+    analysis_results = {}
 
-
-async def analyze_product(product_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-    try:
-        products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
-        product = await products_collection.find_one({"id": product_id})
-        
-        print(product)
-
-        if not product:
-            logger.error(f"Product not found: {product_id}")
-            return None
-
-        prompts = await get_prompts_by_category("competitor_analysis")
-        if not prompts:
-            logger.error("No competitor analysis prompts found in DB")
-            return None
-
-        analyses_collection = get_collection(MongoDBCollections.ANALYSIS)
-        now = datetime.utcnow()
-        all_responses = []
-
-        for prompt in prompts:
-            input_data = {
-                "product_data": product
-            }
-
-            response = await get_gemini_response(
-                prompt_content=prompt["content"],
+    async def run_prompt(block):
+        try:
+            result = await use_stored_prompt(
+                prompt_id=block["id"],
                 input_data=input_data,
-                prompt_id=prompt["id"],
-                project_id=project_id,
-                user_id=user_id,
+                user_id=user_id
             )
 
-            if not response.get("success"):
-                logger.error(f"Prompt failed: {prompt['id']} - {response.get('error')}")
-                continue
+            # Summarize analysis for master recipe use
+            summary = await summarize_analysis_output(result, user_id)
 
-            analysis_entry = {
+            doc = {
                 "id": str(uuid.uuid4()),
                 "product_id": product_id,
-                "project_id": project_id,
+                "prompt_block_id": block["id"],
                 "user_id": user_id,
-                "prompt_id": prompt["id"],
-                "category": product.get("project_category", ""),
-                "subcategory": product.get("project_subcategory", ""),
-                "content": response["response"],
-                "created_at": now,
-                "updated_at": now,
+                "input_data": input_data,
+                "output": result,
+                "summary": summary,
+                "model": settings.DEFAULT_LLM_MODEL,
+                "duration_ms": 0,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "category": main_category,
+                "subcategory": subcategory
             }
-            all_responses.append(response["response"])
-            await analyses_collection.insert_one(analysis_entry)
+            await analysis.insert_one(doc)
+            analysis_results[block["block_title"]] = result
+        except Exception as e:
+            logger.error(f"Error analyzing prompt {block['id']}: {e}")
+            analysis_results[block["block_title"]] = f"Error: {str(e)}"
 
-        if all_responses:
-            logger.info(f"All prompts analyzed for product {product_id}, creating product success recipe")
-            await create_product_success_recipe(product_id, user_id, project_id, product, all_responses)
-            await check_and_generate_master_recipe(product.get("project_category", ""), product.get("project_subcategory", ""), user_id)
+    await asyncio.gather(*(run_prompt(b) for b in active_blocks))
 
-        return {"status": "completed"}
+    await products.update_one(
+        {"id": product_id},
+        {"$set": {"analysis_results": analysis_results, "updated_at": datetime.utcnow()}}
+    )
 
-    except Exception as e:
-        logger.error(f"Error analyzing product {product_id}: {str(e)}")
-        return None
+    # ========== STEP 2: Queue product in memory ==========
 
+    await queue_product_for_analysis(product_id, main_category, subcategory, user_id)
 
-async def create_product_success_recipe(product_id: str, user_id: str, project_id: str, product: Dict[str, Any], analyses: List[str]) -> None:
-    try:
-        prompts = await get_prompts_by_category("product_recipe")
-        prompt = next((p for p in prompts if p.get("is_active", True)), None) or get_default_recipe_prompt("product_recipe")
+    return analysis_results
 
-        input_data = {
-            "product_data": product,
-            "analyses": analyses
-        }
-
-        response = await get_gemini_response(
-            prompt_content=prompt["content"],
-            input_data=input_data,
-            prompt_id=prompt["id"],
-            project_id=project_id,
-            user_id=user_id,
-        )
-
-        if not response.get("success"):
-            logger.error(f"Failed to create success recipe for product {product_id}: {response.get('error')}")
-            return
-
-        recipes_collection = get_collection(MongoDBCollections.RECIPES)
-        now = datetime.utcnow()
-        recipe = {
-            "id": str(uuid.uuid4()),
-            "type": "success_recipe",
-            "product_id": product_id,
-            "project_id": project_id,
-            "user_id": user_id,
-            "category": product.get("category", ""),
-            "subcategory": product.get("subcategory", ""),
-            "content": response["response"],
-            "created_at": now,
-            "updated_at": now,
-        }
-        await recipes_collection.insert_one(recipe)
-        logger.info(f"Product success recipe created for product {product_id}")
-
-    except Exception as e:
-        logger.error(f"Exception while creating product success recipe: {str(e)}")
+async def summarize_analysis_output(output: str, user_id: str) -> str:
+    prompt = f"Summarize the following competitive analysis into 1-3 bullet points. here is the analysis: {output['response']}"
+    response = await get_gemini_response(
+        prompt_content=prompt,
+        input_data={"text": output['response']},
+        user_id=user_id,
+        prompt_id="analysis-summary"
+    )
+    return response["response"] if response.get("success") else output[:300] + "..."
 
 
-async def check_and_generate_master_recipe(category: str, subcategory: str, user_id: str) -> None:
-    try:
-        if not category or not subcategory:
-            return
+# ========== STEP 2: Queue Product & Trigger Master Recipe ==========
 
-        master_recipes_collection = get_collection(MongoDBCollections.MASTER_RECIPES)
-        exists = await master_recipes_collection.find_one({"category": category, "subcategory": subcategory})
-        if exists:
-            logger.info(f"Master recipe already exists for {category} > {subcategory}")
-            return
+async def queue_product_for_analysis(product_id: str, main_category: str, subcategory: str, user_id: str):
+    key = get_category_key(main_category, subcategory)
 
-        recipes_collection = get_collection(MongoDBCollections.RECIPES)
-        count = await recipes_collection.count_documents({
-            "type": "success_recipe",
+    if key not in category_queues:
+        category_queues[key] = []
+
+    if key not in category_locks:
+        category_locks[key] = asyncio.Lock()
+
+    async with category_locks[key]:
+        category_queues[key].append(product_id)
+        await check_and_generate_master_recipes(main_category, subcategory, user_id)
+
+# ========== STEP 3: Check if All Analyzed ==========
+
+async def check_and_generate_master_recipes(category: str, subcategory: str, user_id: str):
+    products = get_collection(MongoDBCollections.PRODUCTS)
+    analysis = get_collection(MongoDBCollections.ANALYSIS)
+    prompts = get_collection(MongoDBCollections.PROMPTS)
+
+    total_expected = await products.count_documents({
+        "category_hierarchy.main_category": category,
+        "category_hierarchy.sub_categories": subcategory
+    })
+
+    max_wait_time = 20  # seconds
+    check_interval = 2  # seconds
+    elapsed = 0
+
+    while elapsed < max_wait_time:
+        analyzed_ids = await analysis.distinct("product_id", {
             "category": category,
             "subcategory": subcategory
         })
 
-        if count < RECIPE_GENERATION_THRESHOLD:
-            logger.info(f"Threshold not met for {category} > {subcategory}: {count}/{RECIPE_GENERATION_THRESHOLD}")
-            return
+        print(f"[Check] Analyzed: {len(analyzed_ids)} / Expected: {total_expected}")
 
-        cursor = recipes_collection.find({
-            "type": "success_recipe",
-            "category": category,
-            "subcategory": subcategory
-        })
-        all_recipes = await cursor.to_list(length=RECIPE_GENERATION_THRESHOLD)
-        recipe_contents = [r["content"] for r in all_recipes]
+        if len(analyzed_ids) >= total_expected:
+            break
 
-        prompts = await get_prompts_by_category("category_recipe")
-        prompt = next((p for p in prompts if p.get("is_active", True)), None) or get_default_recipe_prompt("category_recipe")
+        await asyncio.sleep(check_interval)
+        elapsed += check_interval
 
-        input_data = {
-            "category": category,
-            "subcategory": subcategory,
-            "product_success_recipes": recipe_contents
-        }
+    # Final re-check after loop
+    if len(analyzed_ids) < total_expected:
+        logger.warning(f"[Timeout] Not all products analyzed for {category} > {subcategory}")
+        return
 
-        response = await get_gemini_response(
-            prompt_content=prompt["content"],
-            input_data=input_data,
-            prompt_id=prompt["id"],
-            user_id=user_id,
-        )
+    prompt_blocks = await prompts.find({
+        "is_active": True,
+        "prompt_category": "competitor_analysis"
+    }).to_list(length=100)
 
-        if not response.get("success"):
-            logger.error(f"Failed to generate master recipe for {category} > {subcategory}: {response.get('error')}")
-            return
-
-        master_recipe = {
-            "id": str(uuid.uuid4()),
-            "type": "master_recipe",
-            "user_id": user_id,
-            "category": category,
-            "subcategory": subcategory,
-            "content": response["response"],
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-
-        await master_recipes_collection.insert_one(master_recipe)
-        logger.info(f"Master recipe created for {category} > {subcategory}")
-
-    except Exception as e:
-        logger.error(f"Exception in check_and_generate_master_recipe: {str(e)}")
+    for block in prompt_blocks:
+        await create_master_recipe(block, category, subcategory, user_id)
 
 
+# async def check_and_generate_master_recipes(category: str, subcategory: str, user_id: str):
+#     products = get_collection(MongoDBCollections.PRODUCTS)
+#     analysis = get_collection(MongoDBCollections.ANALYSIS)
+#     prompts = get_collection(MongoDBCollections.PROMPTS)
+
+#     total = await products.count_documents({
+#         "category_hierarchy.main_category": category,
+#         "category_hierarchy.sub_categories": subcategory
+#     })
+
+#     analyzed_ids = await analysis.distinct("product_id", {
+#         "category": category,
+#         "subcategory": subcategory
+#     })
+#     print(f"Analyzed IDs: {analyzed_ids}")
+#     print(f"Total: {total}")
+#     if len(analyzed_ids) < total:
+#         return
+
+#     prompt_blocks = await prompts.find({
+#         "is_active": True,
+#         "prompt_category": "competitor_analysis"
+#     }).to_list(length=100)
+
+#     for block in prompt_blocks:
+#         await create_master_recipe(block, category, subcategory, user_id)
+
+# ========== STEP 4: Create Master Recipe for Block ==========
+
+async def create_master_recipe(block: Dict[str, Any], category: str, subcategory: str, user_id: str):
+    master = get_collection(MongoDBCollections.MASTER_RECIPES)
+    analysis = get_collection(MongoDBCollections.ANALYSIS)
+
+    exists = await master.find_one({
+        "prompt_block_id": block["id"],
+        "category": category,
+        "subcategory": subcategory
+    })
+    if exists:
+        return
+
+    analyses = await analysis.find({
+        "prompt_block_id": block["id"],
+        "category": category,
+        "subcategory": subcategory
+    }).to_list(length=1000)
+
+    if not analyses:
+        return
+
+    input_data = {
+        "prompt_block": {
+            "master_recipe_check": True,
+            "master_recipe_prompt": block.get("master_recipe_prompt")
+        },
+        # "analysis_results": [a["output"] for a in analyses]
+        "analysis_results": [
+            a.get("summary") or a.get("output", "")[:300]
+            for a in analyses[:100]  # Limit to first 100 for prompt safety
+        ]
+    }
+
+    result = await use_stored_prompt(
+        prompt_id=block["id"],
+        input_data=input_data,
+        user_id=user_id
+    )
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "type": "master_recipe",
+        "user_id": user_id,
+        "prompt_block_id": block["id"],
+        "category": category,
+        "subcategory": subcategory,
+        "content": result,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+    await master.insert_one(doc)
+    logger.info(f"Created master recipe for {category} > {subcategory} [block: {block['id']}]")
+
+
+
+"""
+Cursor CODE
+"""
 # import logging
 # import uuid
+# import json
 # from datetime import datetime
 # from typing import Dict, Any, List, Optional
+# import asyncio
 
 # from app.database.mongodb import get_collection, MongoDBCollections
-# from app.utils.gemini import get_gemini_response, get_prompts_by_category
+# from app.utils.gemini import get_gemini_response, get_prompts_by_category, use_stored_prompt
+# from app.config.settings import settings
 
 # logger = logging.getLogger(__name__)
 
+# RECIPE_GENERATION_THRESHOLD = 10
 
-# async def analyze_product(product_id: str, user_id: str, project_id: str) -> Optional[Dict[str, Any]]:
+
+# def get_default_recipe_prompt(prompt_type: str) -> Dict[str, str]:
 #     """
-#     Analyze a scraped product using Gemini API and generate a recipe
+#     Fallback prompt generator if no saved prompt exists in DB.
+#     """
+#     if prompt_type == "product_recipe":
+#         return {
+#             "id": "default-product-recipe",
+#             "content": "Given the product data and the analysis results, generate a clear, actionable success recipe highlighting key strengths and strategies for success."
+#         }
+#     elif prompt_type == "category_recipe":
+#         return {
+#             "id": "default-category-recipe",
+#             "content": "You are given a list of successful product recipes within a specific category and subcategory. Summarize common winning strategies, patterns, and recommendations in a single master recipe."
+#         }
+#     else:
+#         raise ValueError(f"Unsupported prompt type: {prompt_type}")
     
-#     Args:
-#         product_id: ID of the product to analyze
-#         user_id: ID of the user who owns the product
-#         project_id: ID of the project the product belongs to
-        
-#     Returns:
-#         Generated recipe or None if failed
+
+# def format_prompt(template: str, input_data: Dict[str, Any]) -> str:
+#     # Simple recursive string formatter
+#     return template.replace("{{ product_data }}", json.dumps(input_data.get("product_data", ""), indent=2)) \
+#                    .replace("{{ analyses }}", json.dumps(input_data.get("analyses", ""), indent=2)) \
+#                    .replace("{{ product_success_recipes }}", json.dumps(input_data.get("product_success_recipes", ""), indent=2)) \
+#                    .replace("{{ category }}", input_data.get("category", "")) \
+#                    .replace("{{ subcategory }}", input_data.get("subcategory", ""))
+
+
+# async def analyze_product(product_id: str, user_id: str) -> Dict[str, Any]:
 #     """
-#     try:
-#         # Get product data
-#         products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
-#         product = await products_collection.find_one({"id": product_id})
-        
-#         if not product:
-#             logger.error(f"Product not found: {product_id}")
-#             return None
-        
-#         # Get competitor analysis prompts
-#         prompts = await get_prompts_by_category("competitor_analysis")
-#         if not prompts:
-#             logger.error("No competitor analysis prompts found")
-#             return None
-        
-#         # Use the first active prompt (in a real app, you might want to select the specific prompt)
-#         prompt = next((p for p in prompts if p.get("is_active", True)), None)
-#         if not prompt:
-#             logger.error("No active competitor analysis prompts found")
-#             return None
-        
-#         # Prepare input data for the prompt
-#         input_data = {
-#             "product_data": {
-#                 "title": product.get("title", ""),
-#                 "description": product.get("description", ""),
-#                 "features": product.get("features", []),
-#                 "price": product.get("price", ""),
-#                 "category": product.get("category", ""),
-#                 "subcategory": product.get("subcategory", ""),
-#                 "rating": product.get("rating", ""),
-#                 "review_count": product.get("review_count", ""),
+#     Analyze a product using all active prompt blocks in its category
+#     """
+#     products_collection = get_collection(MongoDBCollections.PRODUCTS)
+#     prompts_collection = get_collection(MongoDBCollections.PROMPTS)
+#     analysis_collection = get_collection(MongoDBCollections.ANALYSIS)
+    
+#     # Get product
+#     product = await products_collection.find_one({"id": product_id})
+#     if not product:
+#         raise ValueError(f"Product {product_id} not found")
+    
+#     # print(product)
+#     # Get all active prompt blocks for the competitor_analysis
+#     prompt_blocks = await prompts_collection.find({
+#         "is_active": True,
+#         "prompt_category": "competitor_analysis"
+#     }).to_list(length=100)
+    
+#     # print(prompt_blocks)
+#     if not prompt_blocks:
+#         return {"message": "No active prompt blocks found for this category"}
+    
+#     print("RECEIVED ANALYZE PRODUCT REQUEST")
+#     # Analyze product with each prompt block
+#     analysis_results = {}
+#     for block in prompt_blocks:
+#         try:
+#             # Prepare input data
+#             input_data = {
+#                 "product_data": {
+#                     "title": product["title"],
+#                     "description": product.get("description"),
+#                     "price": product.get("price"),
+#                     "features": product.get("features"),
+#                     "rating": product.get("rating"),
+#                     "review_count": product.get("review_count"),
+#                     "category": product["category_hierarchy"]
+#                 }
+#             }
+            
+#             # Run analysis
+#             start_time = datetime.utcnow()
+#             result = await use_stored_prompt(
+#                 prompt_id=block["id"],
+#                 input_data=input_data,
+#                 user_id=user_id
+#             )
+#             duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            
+#             # Store analysis result
+#             analysis_result = {
+#                 "id": str(uuid.uuid4()),
+#                 "product_id": product_id,
+#                 "prompt_block_id": block["id"],
+#                 "user_id": user_id,
+#                 "input_data": input_data,
+#                 "output": result,
+#                 "model": settings.DEFAULT_LLM_MODEL,
+#                 "duration_ms": duration_ms,
+#                 "created_at": datetime.utcnow(),
+#                 "updated_at": datetime.utcnow()
+#             }
+#             await analysis_collection.insert_one(analysis_result)
+            
+#             # Store result in product's analysis_results
+#             analysis_results[block["block_title"]] = result
+            
+#             # Update prompt block's analyzed_products_count
+#             await prompts_collection.update_one(
+#                 {"id": block["id"]},
+#                 {"$inc": {"analyzed_products_count": 1}}
+#             )
+            
+#             # Check if we should update the master recipe
+#             if block["analyzed_products_count"] + 1 >= settings.MIN_PRODUCTS_FOR_MASTER_RECIPE:
+#                 await update_master_recipe(block["id"])
+            
+#         except Exception as e:
+#             print(f"Error analyzing product {product_id} with block {block['id']}: {str(e)}")
+#             analysis_results[block["block_title"]] = f"Error: {str(e)}"
+    
+#     # Update product with analysis results
+#     await products_collection.update_one(
+#         {"id": product_id},
+#         {
+#             "$set": {
+#                 "analysis_results": analysis_results,
+#                 "updated_at": datetime.utcnow()
 #             }
 #         }
-        
-#         # Call Gemini API
+#     )
+    
+#     return analysis_results
+
+
+# async def update_master_recipe(prompt_block_id: str) -> None:
+#     """
+#     Update the master recipe for a prompt block based on all analysis results
+#     """
+#     prompts_collection = get_collection(MongoDBCollections.PROMPTS)
+#     analysis_collection = get_collection(MongoDBCollections.ANALYSIS)
+    
+#     # Get prompt block
+#     block = await prompts_collection.find_one({"id": prompt_block_id})
+#     if not block:
+#         raise ValueError(f"Prompt block {prompt_block_id} not found")
+    
+#     # Get all analysis results for this block
+#     analysis_results = await analysis_collection.find({
+#         "prompt_block_id": prompt_block_id
+#     }).to_list(length=100)
+    
+#     if not analysis_results:
+#         return
+    
+#     # Prepare input for master recipe generation
+#     input_data = {
+#         "prompt_block": {
+#             "master_recipe_check": True,
+#             "master_recipe_prompt": block["master_recipe_prompt"]
+#         },
+#         "analysis_results": [result["output"] for result in analysis_results]
+#     }
+    
+#     # Generate master recipe using LLM
+#     master_recipe = await use_stored_prompt(
+#         prompt_id=prompt_block_id,
+#         input_data=input_data,
+#         user_id=block["user_id"]
+#     )
+    
+#     # Update prompt block with new master recipe
+#     await prompts_collection.update_one(
+#         {"id": prompt_block_id},
+#         {
+#             "$set": {
+#                 "master_recipe": master_recipe,
+#                 "updated_at": datetime.utcnow()
+#             }
+#         }
+#     )
+
+
+# async def rerun_analysis_for_block(prompt_block_id: str) -> None:
+#     """
+#     Rerun analysis for all products using a specific prompt block
+#     """
+#     prompts_collection = get_collection(MongoDBCollections.PROMPTS)
+#     products_collection = get_collection(MongoDBCollections.PRODUCTS)
+    
+#     # Get prompt block
+#     block = await prompts_collection.find_one({"id": prompt_block_id})
+#     if not block:
+#         raise ValueError(f"Prompt block {prompt_block_id} not found")
+    
+#     # Build query for products
+#     query = {
+#         "category_hierarchy.main_category": block["prompt_category"]
+#     }
+    
+#     # Build sort criteria
+#     sort_field = block.get("sort_field", "created_at")
+#     sort_order = block.get("sort_order", "desc")
+#     sort_direction = -1 if sort_order == "desc" else 1
+#     sort_criteria = [(sort_field, sort_direction)]
+    
+#     # Get products with pagination and sorting
+#     products = await products_collection.find(query).sort(sort_criteria).skip(block.get("skip", 0)).limit(block.get("limit", 2000)).to_list(length=None)
+    
+#     # Rerun analysis for each product
+#     for product in products:
+#         try:
+#             await analyze_product(product["id"], product["user_id"])
+#         except Exception as e:
+#             print(f"Error rerunning analysis for product {product['id']}: {str(e)}")
+#             continue
+
+
+# async def create_product_success_recipe(product_id: str, user_id: str, project_id: str, product: Dict[str, Any], analyses: List[str]) -> None:
+#     try:
+#         prompts = await get_prompts_by_category("product_recipe")
+#         prompt = next((p for p in prompts if p.get("is_active", True)), None) or get_default_recipe_prompt("product_recipe")
+
+#         input_data = {
+#             "product_data": product,
+#             "analyses": analyses
+#         }
+
 #         response = await get_gemini_response(
 #             prompt_content=prompt["content"],
 #             input_data=input_data,
@@ -280,161 +507,95 @@ async def check_and_generate_master_recipe(category: str, subcategory: str, user
 #             project_id=project_id,
 #             user_id=user_id,
 #         )
-        
+
 #         if not response.get("success"):
-#             logger.error(f"Failed to get response from Gemini API: {response.get('error')}")
-#             return None
-        
-#         # Create recipe
+#             logger.error(f"Failed to create success recipe for product {product_id}: {response.get('error')}")
+#             return
+
 #         recipes_collection = get_collection(MongoDBCollections.RECIPES)
 #         now = datetime.utcnow()
-        
 #         recipe = {
 #             "id": str(uuid.uuid4()),
+#             "type": "success_recipe",
+#             "product_id": product_id,
 #             "project_id": project_id,
 #             "user_id": user_id,
-#             "product_id": product_id,
 #             "category": product.get("category", ""),
 #             "subcategory": product.get("subcategory", ""),
 #             "content": response["response"],
 #             "created_at": now,
-#             "updated_at": now
+#             "updated_at": now,
 #         }
-        
-#         # Save recipe to database
 #         await recipes_collection.insert_one(recipe)
-        
-#         # Check if we should generate a master recipe
-#         await check_and_generate_master_recipe(
-#             category=product.get("category", ""),
-#             subcategory=product.get("subcategory", ""),
-#             user_id=user_id
-#         )
-        
-#         return recipe
-    
+#         logger.info(f"Product success recipe created for product {product_id}")
+
 #     except Exception as e:
-#         logger.error(f"Error analyzing product: {str(e)}")
-#         return None
+#         logger.error(f"Exception while creating product success recipe: {str(e)}")
 
 
 # async def check_and_generate_master_recipe(category: str, subcategory: str, user_id: str) -> None:
-#     """
-#     Check if there are enough product recipes to generate a master recipe,
-#     and generate it if needed
-    
-#     Args:
-#         category: Product category
-#         subcategory: Product subcategory
-#         user_id: User ID
-#     """
-#     if not category or not subcategory:
-#         return
-    
-#     # Check if master recipe already exists
-#     master_recipes_collection = get_collection(MongoDBCollections.MASTER_RECIPES)
-#     master_recipe = await master_recipes_collection.find_one({
-#         "category": category,
-#         "subcategory": subcategory
-#     })
-    
-#     if master_recipe:
-#         # Master recipe already exists
-#         return
-    
-#     # Count product recipes for this category/subcategory
-#     recipes_collection = get_collection(MongoDBCollections.RECIPES)
-#     product_recipes_count = await recipes_collection.count_documents({
-#         "category": category,
-#         "subcategory": subcategory
-#     })
-    
-#     # Check if we have enough recipes to generate a master recipe
-#     # In a real app, this threshold might be configurable
-#     if product_recipes_count >= 5:
-#         await generate_master_recipe(category, subcategory, user_id)
-
-
-# async def generate_master_recipe(category: str, subcategory: str, user_id: str) -> Optional[Dict[str, Any]]:
-#     """
-#     Generate a master recipe for a category/subcategory by analyzing all product recipes
-    
-#     Args:
-#         category: Product category
-#         subcategory: Product subcategory
-#         user_id: User ID
-        
-#     Returns:
-#         Generated master recipe or None if failed
-#     """
 #     try:
-#         # Get all product recipes for this category/subcategory
+#         if not category or not subcategory:
+#             return
+
+#         master_recipes_collection = get_collection(MongoDBCollections.MASTER_RECIPES)
+#         exists = await master_recipes_collection.find_one({"category": category, "subcategory": subcategory})
+#         if exists:
+#             logger.info(f"Master recipe already exists for {category} > {subcategory}")
+#             return
+
 #         recipes_collection = get_collection(MongoDBCollections.RECIPES)
-#         cursor = recipes_collection.find({
+#         count = await recipes_collection.count_documents({
+#             "type": "success_recipe",
 #             "category": category,
 #             "subcategory": subcategory
 #         })
-        
-#         product_recipes = await cursor.to_list(length=100)
-        
-#         if not product_recipes:
-#             logger.error(f"No product recipes found for category: {category}, subcategory: {subcategory}")
-#             return None
-        
-#         # Get launch planner prompts
-#         prompts = await get_prompts_by_category("launch_planner")
-#         if not prompts:
-#             logger.error("No launch planner prompts found")
-#             return None
-        
-#         # Use the first active prompt
-#         prompt = next((p for p in prompts if p.get("is_active", True)), None)
-#         if not prompt:
-#             logger.error("No active launch planner prompts found")
-#             return None
-        
-#         # Prepare input data for the prompt
-#         recipe_contents = [recipe["content"] for recipe in product_recipes]
-        
+
+#         if count < RECIPE_GENERATION_THRESHOLD:
+#             logger.info(f"Threshold not met for {category} > {subcategory}: {count}/{RECIPE_GENERATION_THRESHOLD}")
+#             return
+
+#         cursor = recipes_collection.find({
+#             "type": "success_recipe",
+#             "category": category,
+#             "subcategory": subcategory
+#         })
+#         all_recipes = await cursor.to_list(length=RECIPE_GENERATION_THRESHOLD)
+#         recipe_contents = [r["content"] for r in all_recipes]
+
+#         prompts = await get_prompts_by_category("category_recipe")
+#         prompt = next((p for p in prompts if p.get("is_active", True)), None) or get_default_recipe_prompt("category_recipe")
+
 #         input_data = {
 #             "category": category,
 #             "subcategory": subcategory,
-#             "product_recipes": recipe_contents
+#             "product_success_recipes": recipe_contents
 #         }
-        
-#         # Call Gemini API
+
 #         response = await get_gemini_response(
 #             prompt_content=prompt["content"],
 #             input_data=input_data,
 #             prompt_id=prompt["id"],
 #             user_id=user_id,
 #         )
-        
+
 #         if not response.get("success"):
-#             logger.error(f"Failed to get response from Gemini API: {response.get('error')}")
-#             return None
-        
-#         # Create master recipe
-#         master_recipes_collection = get_collection(MongoDBCollections.MASTER_RECIPES)
-#         now = datetime.utcnow()
-        
+#             logger.error(f"Failed to generate master recipe for {category} > {subcategory}: {response.get('error')}")
+#             return
+
 #         master_recipe = {
 #             "id": str(uuid.uuid4()),
+#             "type": "master_recipe",
 #             "user_id": user_id,
 #             "category": category,
 #             "subcategory": subcategory,
 #             "content": response["response"],
-#             "created_at": now,
-#             "updated_at": now
+#             "created_at": datetime.utcnow(),
+#             "updated_at": datetime.utcnow()
 #         }
-        
-#         # Save master recipe to database
+
 #         await master_recipes_collection.insert_one(master_recipe)
-        
-#         logger.info(f"Generated master recipe for category: {category}, subcategory: {subcategory}")
-        
-#         return master_recipe
-    
+#         logger.info(f"Master recipe created for {category} > {subcategory}")
+
 #     except Exception as e:
-#         logger.error(f"Error generating master recipe: {str(e)}")
-#         return None
+#         logger.error(f"Exception in check_and_generate_master_recipe: {str(e)}")

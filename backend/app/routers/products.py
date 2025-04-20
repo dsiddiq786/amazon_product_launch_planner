@@ -1,16 +1,14 @@
 from typing import Any, List, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, BackgroundTasks
-import uuid
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from datetime import datetime
+import uuid
 
-from app.schemas.mongodb_models import ScrapedProduct, Recipe
+from app.schemas.mongodb_models import ScrapedProduct, CategoryHierarchy
 from app.models.user import User, UserRole
-from app.models.project import Project as ProjectModel
 from app.database.mongodb import get_collection, MongoDBCollections
-from app.database.postgresql import get_db
 from app.utils.security import get_current_active_user
+from app.services.analysis import analyze_product
 from app.services.scheduler import scheduler
-from sqlalchemy.orm import Session
 
 router = APIRouter(
     prefix="/products",
@@ -19,52 +17,37 @@ router = APIRouter(
 )
 
 
+@router.get("/count", response_model=Dict[str, int])
+async def get_products_count(
+    current_user: User = Depends(get_current_active_user)
+) -> Any:
+    """
+    Get the total count of products
+    """
+    products_collection = get_collection(MongoDBCollections.PRODUCTS)
+    
+    # Count all products
+    count = await products_collection.count_documents({})
+    
+    return {"count": count}
+
+
 @router.get("/", response_model=List[ScrapedProduct])
 async def list_products(
     skip: int = 0,
     limit: int = 100,
-    project_id: str = Query(None, description="Filter by project ID"),
-    category: str = Query(None, description="Filter by category"),
-    subcategory: str = Query(None, description="Filter by subcategory"),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    category: str = None,
+    current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
-    List scraped products
+    List products for the current user
     """
-    # If project_id is provided, check if user has access to that project
-    if project_id:
-        project = db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
-        if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found"
-            )
-        
-        # Check if user has access to the project
-        if current_user.role != UserRole.ADMIN and project.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not enough permissions"
-            )
-    
-    products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
+    products_collection = get_collection(MongoDBCollections.PRODUCTS)
     
     # Build filter
-    filter_query = {}
-    
-    # Regular users can only see their own products
-    if current_user.role != UserRole.ADMIN:
-        filter_query["user_id"] = current_user.id
-    
-    if project_id:
-        filter_query["project_id"] = project_id
-    
+    filter_query = {"user_id": current_user.id}
     if category:
-        filter_query["category"] = category
-    
-    if subcategory:
-        filter_query["subcategory"] = subcategory
+        filter_query["category_hierarchy.main_category"] = category
     
     # Get products
     cursor = products_collection.find(filter_query).skip(skip).limit(limit)
@@ -75,71 +58,52 @@ async def list_products(
 
 @router.post("/", response_model=ScrapedProduct)
 async def create_product(
-    product_data: Dict[str, Any] = Body(...),
-    background_tasks: BackgroundTasks = None,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    product_data: Dict[str, Any],
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
-    Create a new scraped product
+    Create a new product from scraped data
     """
-    # Check user's scrape quota
-    if current_user.scrape_quota <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Scrape quota exceeded. Please upgrade your plan."
-        )
+    products_collection = get_collection(MongoDBCollections.PRODUCTS)
     
-    # Validate project_id
-    project_id = product_data.get("project_id")
-    if not project_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="project_id is required"
-        )
+    # Extract category hierarchy from breadcrumbs
+    category_hierarchy = None
+    if "breadcrumbs" in product_data:
+        breadcrumbs = product_data["breadcrumbs"]
+        if breadcrumbs:
+            main_category = breadcrumbs[0]
+            sub_categories = breadcrumbs[1:] if len(breadcrumbs) > 1 else []
+            category_hierarchy = CategoryHierarchy(
+                main_category=main_category,
+                sub_categories=sub_categories
+            )
     
-    project = db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
-    
-    # Check if user has access to the project
-    if current_user.role != UserRole.ADMIN and project.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
-    # Add required fields
+    # Create new product
     now = datetime.utcnow()
-    product_id = str(uuid.uuid4())
-    product_data["id"] = product_id
-    product_data["user_id"] = current_user.id
-    product_data["created_at"] = now
-    product_data["updated_at"] = now
+    new_product = {
+        "id": str(uuid.uuid4()),
+        **product_data,
+        "analysis_results": {},
+        "created_at": now,
+        "updated_at": now
+    }
     
-    # Insert product
-    products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
-    await products_collection.insert_one(product_data)
+    await products_collection.insert_one(new_product)
     
-    # Decrease user's scrape quota
-    current_user.scrape_quota -= 1
-    db.commit()
-    
-    # Schedule analysis using the scheduler service
-    task_id = await scheduler.schedule_task(
-        product_id=product_id,
+    # Schedule product analysis in background
+    # background_tasks.add_task(analyze_product, new_product["id"], current_user.id)
+    # 🔁 Schedule background analysis using the improved scheduler
+    background_tasks.add_task(
+        scheduler.schedule_task,
+        product_id=new_product["id"],
         user_id=current_user.id,
-        project_id=project_id,
-        delay_seconds=5  # Small delay to allow the transaction to complete
+        project_id=new_product.get("project_id", "default"),
+        delay_seconds=0,
+        task_type="standard_analysis"
     )
     
-    # Add task_id to the response
-    product_data["analysis_task_id"] = task_id
-    
-    return product_data
+    return new_product
 
 
 @router.get("/{product_id}", response_model=ScrapedProduct)
@@ -148,22 +112,18 @@ async def get_product(
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
-    Get scraped product by ID
+    Get product by ID
     """
-    products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
+    products_collection = get_collection(MongoDBCollections.PRODUCTS)
+    product = await products_collection.find_one({
+        "id": product_id,
+        "user_id": current_user.id
+    })
     
-    product = await products_collection.find_one({"id": product_id})
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found"
-        )
-    
-    # Check if user has access to this product
-    if current_user.role != UserRole.ADMIN and product["user_id"] != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
         )
     
     return product
@@ -175,220 +135,49 @@ async def delete_product(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Delete scraped product
+    Delete product
     """
-    products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
+    products_collection = get_collection(MongoDBCollections.PRODUCTS)
     
-    product = await products_collection.find_one({"id": product_id})
+    # Check if product exists and belongs to user
+    product = await products_collection.find_one({
+        "id": product_id,
+        "user_id": current_user.id
+    })
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found"
         )
     
-    # Check if user has access to this product
-    if current_user.role != UserRole.ADMIN and product["user_id"] != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
     # Delete product
     await products_collection.delete_one({"id": product_id})
-    
-    # Delete associated recipes
-    recipes_collection = get_collection(MongoDBCollections.RECIPES)
-    await recipes_collection.delete_many({"product_id": product_id})
     # No return value for 204 response
 
 
 @router.post("/{product_id}/analyze", response_model=Dict[str, Any])
 async def analyze_product_manually(
     product_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user)
 ) -> Any:
     """
     Manually trigger product analysis
     """
-    products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
+    products_collection = get_collection(MongoDBCollections.PRODUCTS)
     
-    product = await products_collection.find_one({"id": product_id})
+    # Check if product exists and belongs to user
+    product = await products_collection.find_one({
+        "id": product_id,
+        "user_id": current_user.id
+    })
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found"
         )
     
-    # Check if user has access to this product
-    if current_user.role != UserRole.ADMIN and product["user_id"] != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
+    # Schedule product analysis in background
+    background_tasks.add_task(analyze_product, product_id, current_user.id)
     
-    # Schedule analysis using the scheduler service
-    task_id = await scheduler.schedule_task(
-        product_id=product_id,
-        user_id=current_user.id,
-        project_id=product["project_id"],
-        delay_seconds=0  # Execute immediately
-    )
-    
-    return {
-        "message": "Analysis started", 
-        "product_id": product_id,
-        "task_id": task_id
-    }
-
-
-@router.get("/{product_id}/recipe", response_model=Recipe)
-async def get_product_recipe(
-    product_id: str,
-    current_user: User = Depends(get_current_active_user)
-) -> Any:
-    """
-    Get recipe for a specific product
-    """
-    products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
-    recipes_collection = get_collection(MongoDBCollections.RECIPES)
-    
-    # Check if product exists and user has access to it
-    product = await products_collection.find_one({"id": product_id})
-    if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found"
-        )
-    
-    if current_user.role != UserRole.ADMIN and product["user_id"] != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
-    # Get recipe
-    recipe = await recipes_collection.find_one({
-        "product_id": product_id,
-        "is_master": False
-    })
-    
-    if not recipe:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Recipe not found for this product. Try analyzing the product first."
-        )
-    
-    return recipe
-
-
-@router.get("/project/{project_id}/master-recipe", response_model=Optional[Recipe])
-async def get_master_recipe(
-    project_id: str,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-) -> Any:
-    """
-    Get master recipe for a project's category and subcategory
-    """
-    # Check if project exists and user has access to it
-    project = db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
-    
-    if current_user.role != UserRole.ADMIN and project.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
-    # Get master recipe for this category/subcategory
-    master_recipes_collection = get_collection(MongoDBCollections.MASTER_RECIPES)
-    recipe = await master_recipes_collection.find_one({
-        "category": project.category,
-        "subcategory": project.subcategory
-    })
-    
-    # Add is_master flag for compatibility with the Recipe model
-    if recipe:
-        recipe["is_master"] = True
-    
-    # If not found, return None (not an error)
-    return recipe
-
-
-@router.get("/check-master-recipe/{project_id}", response_model=Dict[str, Any])
-async def check_master_recipe_exists(
-    project_id: str,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-) -> Any:
-    """
-    Check if a master recipe exists for the project's category and subcategory.
-    Used by the Chrome extension to determine if scraping is needed.
-    """
-    # Check if project exists and user has access to it
-    project = db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found"
-        )
-    
-    if current_user.role != UserRole.ADMIN and project.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
-    # Get master recipe for this category/subcategory
-    master_recipes_collection = get_collection(MongoDBCollections.MASTER_RECIPES)
-    recipe = await master_recipes_collection.find_one({
-        "category": project.category,
-        "subcategory": project.subcategory
-    })
-    
-    # Count products for this category/subcategory
-    products_collection = get_collection(MongoDBCollections.SCRAPED_DATA)
-    product_count = await products_collection.count_documents({
-        "category": project.category,
-        "subcategory": project.subcategory
-    })
-    
-    return {
-        "exists": recipe is not None,
-        "message": "Success recipe already available. Please proceed." if recipe else "Please scrape the top 10 products in this category.",
-        "product_count": product_count,
-        "quota_remaining": current_user.scrape_quota,
-        "category": project.category,
-        "subcategory": project.subcategory
-    }
-
-
-@router.get("/analysis/task/{task_id}", response_model=Dict[str, Any])
-async def get_analysis_task_status(
-    task_id: str,
-    current_user: User = Depends(get_current_active_user)
-) -> Any:
-    """
-    Get the status of an analysis task
-    """
-    # Get task status
-    task_status = await scheduler.get_task_status(task_id)
-    
-    if not task_status:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task not found"
-        )
-    
-    # Check if user has access to this task
-    if current_user.role != UserRole.ADMIN and task_status.get("user_id") != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
-    return task_status 
+    return {"message": "Product analysis scheduled"} 

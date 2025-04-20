@@ -1,3 +1,4 @@
+from enum import Enum
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.database import Database
 from pymongo.collection import Collection
@@ -9,28 +10,28 @@ client = AsyncIOMotorClient(settings.MONGODB_URL)
 database = client[settings.MONGODB_DB]
 
 
-class MongoDBCollections:
-    """MongoDB Collections for the application."""
-    SCRAPED_DATA = "scraped_data"
+class MongoDBCollections(str, Enum):
+    """MongoDB collection names"""
+    PRODUCTS = "products"
     PROMPTS = "prompts"
+    ANALYSIS = "analysis"
     LOGS = "logs"
     RECIPES = "recipes"
-    ANALYSIS = "analysis"
     MASTER_RECIPES = "master_recipes"
     ANALYSIS_TASKS = "analysis_tasks"
 
 
-def get_collection(collection_name: str) -> Collection:
+def get_collection(collection: MongoDBCollections) -> Collection:
     """
     Get a MongoDB collection.
     
     Args:
-        collection_name: Name of the collection to retrieve
+        collection: Name of the collection to retrieve
         
     Returns:
         Collection object for the specified collection
     """
-    return database[collection_name]
+    return database[collection]
 
 
 async def connect_to_mongodb() -> None:
