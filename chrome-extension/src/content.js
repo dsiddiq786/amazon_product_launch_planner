@@ -1,14 +1,126 @@
 // Check if current page is an Amazon product page
 const isProductPage = () => {
+    // Check URL patterns
     const path = window.location.pathname;
-    return path.includes('/dp/') || path.includes('/gp/product/');
-  };
-  
-  // Maximum number of retries for robust scraping
-  const MAX_RETRIES = 3;
-  
-  // Main product data extraction function
-  const extractProductData = () => {
+    const isProductUrl = path.includes('/dp/') || 
+                         path.includes('/gp/product/') || 
+                         path.includes('/product/') ||
+                         path.includes('/gp/offer-listing/');
+    
+    // Check for product-specific elements
+    const hasProductTitle = !!document.querySelector('#productTitle, #title, .product-title, h1.a-size-large');
+    const hasProductPrice = !!document.querySelector('.a-price .a-offscreen, #priceblock_ourprice, #priceblock_dealprice, span.a-price');
+    
+    // Additional checks for product elements that might be present
+    const hasAddToCartButton = !!document.querySelector('#add-to-cart-button, #submit.add-to-cart');
+    const hasBuyNowButton = !!document.querySelector('#buy-now-button');
+    const hasProductDetail = !!document.querySelector('#productDetails, #detail-bullets, #detailBullets');
+    
+    // Look for any ASIN in the page - strong indicator of a product page
+    const hasAsin = document.body.innerHTML.match(/[A-Z0-9]{10}/) !== null;
+    
+    // Debug
+    console.log('isProductPage checks:', { 
+        isProductUrl, 
+        hasProductTitle, 
+        hasProductPrice,
+        hasAddToCartButton,
+        hasBuyNowButton,
+        hasProductDetail,
+        hasAsin
+    });
+    
+    // It's a product page if URL pattern matches OR if it has key product elements
+    const isProduct = isProductUrl || 
+                     (hasProductTitle && hasProductPrice) || 
+                     (hasProductTitle && (hasAddToCartButton || hasBuyNowButton)) ||
+                     (hasProductTitle && hasProductDetail);
+    
+    console.log('isProductPage result:', isProduct);
+    
+    return isProduct;
+};
+
+// Maximum number of retries for robust scraping
+const MAX_RETRIES = 3;
+
+// Extract category hierarchy from breadcrumbs
+const extractCategoryHierarchy = () => {
+    const breadcrumbs = [];
+    const breadcrumbSelectors = [
+        '#wayfinding-breadcrumbs_container ul li a',
+        '#wayfinding-breadcrumbs_feature_div ul li a',
+        '.a-breadcrumb li a',
+        '.a-unordered-list.a-horizontal.a-size-small li a'
+    ];
+
+    // Try different selectors to find breadcrumbs
+    for (const selector of breadcrumbSelectors) {
+        const elements = document.querySelectorAll(selector);
+        if (elements.length > 0) {
+            elements.forEach(el => {
+                const text = el.textContent.trim();
+                // Only add non-empty text that's not a navigation symbol
+                if (text && !text.includes('›') && !text.includes('>')) {
+                    breadcrumbs.push(text);
+                }
+            });
+            break;
+        }
+    }
+
+    // If no breadcrumbs found with anchors, try text nodes
+    if (breadcrumbs.length === 0) {
+        const textSelectors = [
+            '#wayfinding-breadcrumbs_container ul li',
+            '#wayfinding-breadcrumbs_feature_div ul li',
+            '.a-breadcrumb li'
+        ];
+
+        for (const selector of textSelectors) {
+            const elements = document.querySelectorAll(selector);
+            if (elements.length > 0) {
+                elements.forEach(el => {
+                    const text = el.textContent.trim();
+                    // Only add non-empty text that's not a navigation symbol
+                    if (text && !text.includes('›') && !text.includes('>')) {
+                        breadcrumbs.push(text);
+                    }
+                });
+                break;
+            }
+        }
+    }
+
+    console.log('Extracted breadcrumbs:', breadcrumbs);
+
+    if (breadcrumbs.length > 0) {
+        return {
+            main_category: breadcrumbs[0],
+            sub_categories: breadcrumbs.slice(1)
+        };
+    }
+    
+    // If no breadcrumbs found, try to extract from page metadata
+    const categoryEl = document.querySelector('meta[name="keywords"]');
+    if (categoryEl) {
+        const categories = categoryEl.getAttribute('content').split(',');
+        if (categories.length > 0) {
+            return {
+                main_category: categories[0].trim(),
+                sub_categories: categories.slice(1).map(c => c.trim())
+            };
+        }
+    }
+
+    return {
+        main_category: '',
+        sub_categories: []
+    };
+};
+
+// Main product data extraction function
+const extractProductData = () => {
     try {
       const data = {};
   
@@ -35,13 +147,48 @@ const isProductPage = () => {
   
       // --- ASIN ---
       let asin = '';
+      
+      // Method 1: URL pattern matching
       const urlMatch = window.location.pathname.match(/\/([A-Z0-9]{10})(\/|$|\?)/);
       if (urlMatch && urlMatch[1]) {
         asin = urlMatch[1];
-      } else {
-        const asinEl = document.querySelector('[name="ASIN"], input[name="asin"], [data-asin]');
-        asin = asinEl ? (asinEl.value || asinEl.getAttribute('data-asin')) : '';
       }
+      
+      // Method 2: Hidden ASIN input if not found in URL
+      if (!asin) {
+        const asinEl = document.querySelector('[name="ASIN"], input[name="asin"], [data-asin]');
+        if (asinEl) {
+          asin = asinEl.value || asinEl.getAttribute('data-asin') || '';
+        }
+      }
+      
+      // Method 3: Look for ASIN in detail bullets
+      if (!asin) {
+        const detailElements = document.querySelectorAll('#detailBullets_feature_div li, #productDetails tr');
+        for (const el of detailElements) {
+          const text = el.textContent;
+          if (text.includes('ASIN') || text.includes('ISBN')) {
+            const match = text.match(/[A-Z0-9]{10}/);
+            if (match) {
+              asin = match[0];
+              break;
+            }
+          }
+        }
+      }
+      
+      // Method 4: Search in entire page body as last resort
+      if (!asin) {
+        const bodyText = document.body.innerHTML;
+        const asinMatches = bodyText.match(/ASIN\s*:\s*([A-Z0-9]{10})/i) || 
+                           bodyText.match(/ASIN[^\w]([A-Z0-9]{10})/i) ||
+                           bodyText.match(/item model number[^\w]+([A-Z0-9]{10})/i);
+        if (asinMatches && asinMatches[1]) {
+          asin = asinMatches[1];
+        }
+      }
+      
+      console.log('Extracted ASIN:', asin);
       data.asin = asin;
   
       // --- Price ---
@@ -162,7 +309,8 @@ const isProductPage = () => {
         '#productDetails_techSpec_section_1 tr',
         '#productDetails_techSpec_section_2 tr',
         '#technicalSpecifications_section_1 tr',
-        '#detailBullets_feature_div li'
+        '#detailBullets_feature_div li',
+        '#productDetails_detailBullets_sections1 tr',
       ];
       techDetailSelectors.forEach(selector => {
         const elements = document.querySelectorAll(selector);
@@ -257,18 +405,55 @@ const isProductPage = () => {
   
       // --- Image URLs ---
       let imageUrls = new Set();
-      const mainImageSelectors = ['#landingImage', '#imgBlkFront', '#main-image'];
+      // Try various selectors to find the main product image
+      const mainImageSelectors = [
+        '#landingImage', 
+        '#imgBlkFront', 
+        '#main-image', 
+        '.image.maintain-height',
+        '.imgTagWrapper img',
+        '#imageBlock img',
+        '.a-dynamic-image'
+      ];
+      
+      // First try to get high-resolution version
       for (const sel of mainImageSelectors) {
         const img = document.querySelector(sel);
         if (img) {
-          let url = img.getAttribute('data-old-hires') || img.getAttribute('src');
+          // Try to get the highest resolution version
+          let url = img.getAttribute('data-old-hires') || 
+                   img.getAttribute('data-a-dynamic-image') || // This contains JSON with multiple sizes
+                   img.src;
+                   
+          // Parse data-a-dynamic-image if available (it's a JSON string with URLs as keys)
+          if (url && url.includes('{')) {
+            try {
+              const imgData = JSON.parse(url);
+              // Get the URL with the highest resolution
+              const urls = Object.keys(imgData);
+              if (urls.length) {
+                // Sort by resolution values and take the highest
+                url = urls.sort((a, b) => imgData[b][0] * imgData[b][1] - imgData[a][0] * imgData[a][1])[0];
+              }
+            } catch (e) {
+              console.error('Error parsing image data:', e);
+            }
+          }
+          
           if (url) {
-            url = url.replace(/_S[0-9]+_/, '_SL1500_').replace(/_AC_[^.]+\./, '_AC_SL1500_.');
+            // Clean up URL to get highest resolution version
+            url = url.replace(/_S[0-9]+_/, '_SL1500_')
+                    .replace(/_AC_[^.]+\./, '_AC_SL1500_.')
+                    .replace(/\._.*_\./, '._SL1500_.');
             imageUrls.add(url);
           }
+          
+          data.image_url = url; // Set main image directly in data
           break;
         }
       }
+      
+      // Look for thumbnail images as well
       const thumbEls = document.querySelectorAll('#altImages .a-button-thumbnail img, #imageBlockThumbs img, .imageThumbnail img');
       thumbEls.forEach(img => {
         if (img && !img.src.includes('sprite') && !img.src.includes('gif') && !img.src.includes('play-icon')) {
@@ -276,11 +461,12 @@ const isProductPage = () => {
           if (url) {
             url = url.replace(/_S[0-9]+_/, '_SL1500_')
                      .replace(/_AC_[^.]+\./, '_AC_SL1500_.')
-                     .replace(/\._SS\d+_/, '');
+                     .replace(/\._SS\d+_/, '._SL1500_.');
             imageUrls.add(url);
           }
         }
       });
+      
       data.imageUrls = Array.from(imageUrls);
   
       // --- Keywords ---
@@ -292,646 +478,203 @@ const isProductPage = () => {
       // --- Additional Meta ---
       data.url = window.location.href;
       data.timestamp = new Date().toISOString();
-  
+      // --- Category Hierarchy ---
+      const categoryHierarchy = extractCategoryHierarchy();
+      data.category_hierarchy = categoryHierarchy;
+      data.main_category = categoryHierarchy.main_category;
+      data.sub_categories = categoryHierarchy.sub_categories;
+      data.sub_category = categoryHierarchy.sub_categories.slice(-1)[0];
+      
       return data;
     } catch (error) {
       console.error('Error extracting product data:', error);
       return null;
     }
-  };
-  
-  // Robust scraping with retry mechanism if critical fields are missing
-  const robustScrapeProduct = (retryCount = 0) => {
-    const productData = extractProductData();
-    // Check if critical fields (bestSellersRank and dateFirstAvailable) are non-empty
-    if (
-      productData &&
-      (!productData.bestSellersRank || !productData.dateFirstAvailable) &&
-      retryCount < MAX_RETRIES
-    ) {
-      console.warn(`Retry ${retryCount + 1}: Critical fields missing. Waiting and retrying...`);
-      setTimeout(() => {
-        robustScrapeProduct(retryCount + 1);
-      }, 2000);
-    } else if (productData) {
-      chrome.runtime.sendMessage({
-        type: 'PRODUCT_SCRAPED',
-        product: productData
-      });
+};
+
+// Robust scraping with retries
+const robustScrapeProduct = (retryCount = 0) => {
+    try {
+        const productData = extractProductData();
+        if (productData && productData.title && productData.asin) {
+            return productData;
+        }
+        
+        if (retryCount < MAX_RETRIES) {
+            // Use a promise to handle the asynchronous retry
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve(robustScrapeProduct(retryCount + 1));
+                }, 1000);
+            });
+        }
+    } catch (error) {
+        console.error('Error in robust scraping:', error);
+        if (retryCount < MAX_RETRIES) {
+            // Use a promise to handle the asynchronous retry
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve(robustScrapeProduct(retryCount + 1));
+                }, 1000);
+            });
+        }
     }
-  };
-  
-  // Main scraping logic to run on product pages
-  const scrapeProduct = () => {
-    if (!isProductPage()) return;
-    robustScrapeProduct();
-  };
-  
-  // Run scraping when the page loads
-  if (isProductPage()) {
-    setTimeout(scrapeProduct, 2000);
-  }
-  
-  // Listen for URL changes (for SPA navigation)
-  let lastUrl = location.href;
-  new MutationObserver(() => {
+    return null;
+};
+
+// State tracking
+let isScrapingProduct = false;
+let lastScrapedAsin = '';
+let lastScrapedUrl = '';
+let lastScrapedTime = 0;
+const MIN_SCRAPE_INTERVAL = 10000; // Minimum 10 seconds between scrapes
+
+// Get product data without scraping
+const getProductData = () => {
+    try {
+        // Check if we're on a product page
+        if (!isProductPage()) {
+            console.log("Not on a product page according to detection");
+            return { success: false, error: 'Not a product page' };
+        }
+        
+        console.log("On a product page, extracting data...");
+        // Extract product data
+        const productData = extractProductData();
+        
+        if (!productData) {
+            console.log("Failed to extract product data");
+            return { success: false, error: 'Failed to extract product data' };
+        }
+        
+        // Validate the extracted data
+        if (!productData.asin) {
+            console.log("Missing ASIN in extracted data");
+            // Still return partial data for debugging purposes
+            return { 
+                success: false, 
+                error: 'Missing ASIN - required for analysis',
+                product: productData 
+            };
+        }
+        
+        if (!productData.title) {
+            console.log("Missing title in extracted data");
+            // Not essential but helpful
+            productData.title = document.title.replace(' - Amazon.com', '');
+        }
+        
+        // Get image URL if missing
+        if (!productData.image_url) {
+            const mainImage = document.querySelector('#landingImage, #imgBlkFront, #main-image');
+            if (mainImage) {
+                productData.image_url = mainImage.src;
+            }
+        }
+        
+        console.log("Successfully extracted product data with ASIN:", productData.asin);
+        return { success: true, product: productData };
+    } catch (error) {
+        console.error('Error getting product data:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// Listen for messages from popup or background script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'CHECK_PRODUCT_PAGE') {
+        // Check if current page is a product page
+        sendResponse({ isProductPage: isProductPage() });
+    } else if (message.type === 'SCRAPE_PRODUCT') {
+        // Scrape product data
+        scrapeProduct().then(result => {
+            sendResponse(result);
+        }).catch(error => {
+            sendResponse({ success: false, error: error.message });
+        });
+        return true; // Indicate async response
+    } else if (message.type === 'GET_PRODUCT_DATA') {
+        // Get product data without scraping
+        sendResponse(getProductData());
+    }
+});
+
+// Main scraping function
+const scrapeProduct = async () => {
+    // Check if we're already scraping
+    if (isScrapingProduct) {
+        console.log('Already scraping, not starting another scrape');
+        return false;
+    }
+    
+    // Prevent scraping the same URL repeatedly in a short time
+    const currentUrl = location.href;
+    const now = Date.now();
+    if (currentUrl === lastScrapedUrl && now - lastScrapedTime < MIN_SCRAPE_INTERVAL) {
+        console.log(`Skipping scrape - same URL scraped ${(now - lastScrapedTime)/1000}s ago`);
+        return false;
+    }
+    
+    try {
+        isScrapingProduct = true;
+        lastScrapedUrl = currentUrl;
+        lastScrapedTime = now;
+        
+        const productData = await robustScrapeProduct();
+        if (productData) {
+            // Check if this is the same ASIN we just scraped
+            if (productData.asin === lastScrapedAsin) {
+                console.log('Duplicate product ASIN detected, not sending again:', productData.asin);
+                return false;
+            }
+            
+            // Update last scraped ASIN
+            lastScrapedAsin = productData.asin;
+            
+            // Send message to background script instead of popup
+            chrome.runtime.sendMessage({
+                type: 'PRODUCT_SCRAPED',
+                product: productData
+            });
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('Error in scrapeProduct:', error);
+        return false;
+    } finally {
+        isScrapingProduct = false;
+    }
+};
+
+// Run scraping when the page loads if auto-scrape is enabled
+if (isProductPage()) {
+    // Automatically scrape after a delay to allow page to fully load
+    // Use a random delay between 3-7 seconds to avoid all extensions sending requests at once
+    const randomDelay = 3000 + Math.floor(Math.random() * 4000);
+    setTimeout(() => {
+        console.log(`Product page detected, automatically scraping after ${randomDelay}ms delay`);
+        scrapeProduct();
+    }, randomDelay);
+}
+
+// Detect URL changes for SPA navigation
+let lastUrl = location.href;
+new MutationObserver(() => {
     const url = location.href;
     if (url !== lastUrl) {
-      lastUrl = url;
-      if (isProductPage()) {
-        setTimeout(scrapeProduct, 2000);
-      }
+        lastUrl = url;
+        const isProduct = isProductPage();
+        
+        // Notify background script about URL change
+        chrome.runtime.sendMessage({
+            type: 'URL_CHANGED',
+            url: url,
+            isProductPage: isProduct
+        });
+        
+        // If it's a product page, automatically scrape after URL change
+        // The background script will handle this instead of doing it here
+        // to prevent duplicate scraping
     }
-  }).observe(document, { subtree: true, childList: true });
-  
-
-
-
-// WORKING CODE 
-// // Check if current page is an Amazon product page
-// const isProductPage = () => {
-//     const path = window.location.pathname;
-//     return path.includes('/dp/') || path.includes('/gp/product/');
-//   };
-  
-//   // Main product data extraction function
-//   const extractProductData = () => {
-//     try {
-//       const data = {};
-  
-//       // --- Title ---
-//       const titleSelectors = ['#productTitle', '#title', '.product-title', 'h1.a-size-large'];
-//       for (const sel of titleSelectors) {
-//         const el = document.querySelector(sel);
-//         if (el && el.textContent.trim()) {
-//           data.title = el.textContent.trim();
-//           break;
-//         }
-//       }
-  
-//       // --- Description ---
-//       const descriptionSelectors = ['#productDescription', '#feature-bullets', '#aplus', '.a-expander-content'];
-//       let description = '';
-//       for (const sel of descriptionSelectors) {
-//         const el = document.querySelector(sel);
-//         if (el && el.textContent.trim()) {
-//           description += el.textContent.trim() + ' ';
-//         }
-//       }
-//       data.description = description.trim();
-  
-//       // --- ASIN ---
-//       let asin = '';
-//       const urlMatch = window.location.pathname.match(/\/([A-Z0-9]{10})(\/|$|\?)/);
-//       if (urlMatch && urlMatch[1]) {
-//         asin = urlMatch[1];
-//       } else {
-//         const asinEl = document.querySelector('[name="ASIN"], input[name="asin"], [data-asin]');
-//         asin = asinEl ? (asinEl.value || asinEl.getAttribute('data-asin')) : '';
-//       }
-//       data.asin = asin;
-  
-//       // --- Price ---
-//       const priceSelectors = [
-//         '.a-price .a-offscreen',
-//         '#priceblock_ourprice',
-//         '#priceblock_dealprice',
-//         '.a-price .a-price-whole',
-//         '.priceToPay span.a-price-whole',
-//         '.a-section .a-color-price'
-//       ];
-//       let price = '';
-//       for (const sel of priceSelectors) {
-//         const el = document.querySelector(sel);
-//         if (el && el.textContent.trim()) {
-//           price = el.textContent.trim();
-//           break;
-//         }
-//       }
-//       data.price = price;
-  
-//       // --- Rating ---
-//       let rating = '';
-//       const ratingSelectors = [
-//         '#acrPopover',
-//         '.a-icon-star',
-//         '.reviewCountTextLinkedHistogram',
-//         'span.a-size-base.a-color-base'
-//       ];
-//       for (const sel of ratingSelectors) {
-//         const el = document.querySelector(sel);
-//         if (el) {
-//           const ratingText = el.textContent.trim();
-//           const match = ratingText.match(/(\d+(\.\d+)?)/);
-//           if (match) {
-//             rating = match[0];
-//             break;
-//           } else {
-//             rating = ratingText;
-//             break;
-//           }
-//         }
-//       }
-//       data.rating = rating;
-  
-//       // --- Review Count ---
-//       let reviewCount = '';
-//       const reviewCountEl = document.querySelector('#acrCustomerReviewText');
-//       if (reviewCountEl) {
-//         reviewCount = reviewCountEl.textContent.replace(/[^0-9]/g, '');
-//       }
-//       data.reviewCount = reviewCount;
-  
-//       // --- Best Sellers Rank (capture complete string) ---
-//       let bestSellersRank = '';
-//       const rankLabels = ["Best Sellers Rank", "Best-sellers rank", "Bestsellers rank", "Amazon Best Sellers Rank"];
-//       // Try table rows first
-//       const tableRows = document.querySelectorAll('#productDetails_detailBullets_sections1 tr, #productDetails table tr');
-//       for (const row of tableRows) {
-//         const header = row.querySelector('th, .a-color-secondary');
-//         if (header && rankLabels.some(label => header.textContent.includes(label))) {
-//           const valueCell = row.querySelector('td, .a-color-base');
-//           if (valueCell) {
-//             bestSellersRank = valueCell.textContent.trim();
-//             break;
-//           }
-//         }
-//       }
-//       // If not found, try detail bullets
-//       if (!bestSellersRank) {
-//         const detailItems = document.querySelectorAll('#detailBullets_feature_div li, .detail-bullet-list li');
-//         for (const item of detailItems) {
-//           const text = item.textContent.trim();
-//           if (rankLabels.some(label => text.includes(label))) {
-//             bestSellersRank = text;
-//             break;
-//           }
-//         }
-//       }
-//       data.bestSellersRank = bestSellersRank;
-  
-//       // --- Bullet Points (Features) ---
-//       let bulletPoints = [];
-//       const bulletEls = document.querySelectorAll('#feature-bullets .a-list-item, .a-unordered-list .a-list-item');
-//       bulletEls.forEach(li => {
-//         const text = li.textContent.trim();
-//         if (text && !text.toLowerCase().includes('warranty') && !bulletPoints.includes(text)) {
-//           bulletPoints.push(text);
-//         }
-//       });
-//       data.features = bulletPoints;  // Rename field to "features" per required data
-  
-//       // --- Brand ---
-//       let brand = '';
-//       const brandSelectors = ['#bylineInfo', '.contributorNameID', 'a#brand', '#brand'];
-//       for (const sel of brandSelectors) {
-//         const el = document.querySelector(sel);
-//         if (el && el.textContent.trim()) {
-//           brand = el.textContent
-//             .replace(/^Brand:\s*/i, '')
-//             .replace(/^Visit the\s*/i, '')
-//             .replace(/\s*Store$/i, '')
-//             .trim();
-//           if (brand) break;
-//         }
-//       }
-//       data.brand = brand;
-  
-//       // --- Technical Details ---
-//       let technicalDetails = {};
-//       const techDetailSelectors = [
-//         '#productDetails_techSpec_section_1 tr',
-//         '#productDetails_techSpec_section_2 tr',
-//         '#technicalSpecifications_section_1 tr',
-//         '#detailBullets_feature_div li'
-//       ];
-//       techDetailSelectors.forEach(selector => {
-//         const elements = document.querySelectorAll(selector);
-//         elements.forEach(element => {
-//           let label, value;
-//           if (element.tagName === 'TR') {
-//             const th = element.querySelector('th');
-//             const td = element.querySelector('td');
-//             if (th && td) {
-//               label = th.textContent.trim();
-//               value = td.textContent.trim();
-//             }
-//           } else {
-//             const text = element.textContent.trim();
-//             const parts = text.split(':');
-//             if (parts.length >= 2) {
-//               label = parts.shift().trim();
-//               value = parts.join(':').trim();
-//             }
-//           }
-//           if (label && value) {
-//             technicalDetails[label] = value;
-//           }
-//         });
-//       });
-//       data.technicalDetails = technicalDetails;
-  
-//       // --- Customer Reviews ---
-//       let customerReviews = [];
-//       const reviewEls = document.querySelectorAll('[data-hook="review"]');
-//       reviewEls.forEach(review => {
-//         const ratingEl = review.querySelector('[data-hook="review-star-rating"], [data-hook="rating-out-of-text"]');
-//         const titleEl = review.querySelector('[data-hook="review-title"]');
-//         const bodyEl = review.querySelector('[data-hook="review-body"]');
-//         const dateEl = review.querySelector('[data-hook="review-date"]');
-//         const verifiedEl = review.querySelector('[data-hook="avp-badge"]');
-//         if (bodyEl) {
-//           customerReviews.push({
-//             title: titleEl ? titleEl.textContent.trim() : '',
-//             rating: ratingEl ? ratingEl.textContent.replace(/[^0-9.]/g, '') : '',
-//             content: bodyEl.textContent.trim(),
-//             date: dateEl ? dateEl.textContent.trim() : '',
-//             verified: !!verifiedEl
-//           });
-//         }
-//       });
-//       data.customerReviews = customerReviews;
-  
-//       // --- Customer Sayings ---
-//       let customerSayings = [];
-//       const sayingEls = document.querySelectorAll('.cr-lighthouse-term');
-//       sayingEls.forEach(el => {
-//         const topicEl = el.querySelector('.a-declarative');
-//         const percentageEl = el.querySelector('.cr-lighthouse-term-percentage');
-//         const topic = topicEl ? topicEl.textContent.trim() : '';
-//         const percentage = percentageEl ? percentageEl.textContent.trim() : '';
-//         if (topic && percentage) {
-//           customerSayings.push({ topic, percentage });
-//         }
-//       });
-//       data.customerSayings = customerSayings;
-  
-//       // --- Date First Available ---
-//       let dateFirstAvailable = '';
-//       const dateLabels = ["Date First Available", "Release date", "Publication date"];
-//       // Try table rows first
-//       const dateTableRows = document.querySelectorAll('#productDetails_detailBullets_sections1 tr, #productDetails table tr');
-//       for (const row of dateTableRows) {
-//         const header = row.querySelector('th, .a-color-secondary');
-//         if (header && dateLabels.some(label => header.textContent.includes(label))) {
-//           const valueCell = row.querySelector('td, .a-color-base');
-//           if (valueCell) {
-//             dateFirstAvailable = valueCell.textContent.trim();
-//             break;
-//           }
-//         }
-//       }
-//       // If not found, try detail bullets
-//       if (!dateFirstAvailable) {
-//         const dateItems = document.querySelectorAll('#detailBullets_feature_div li, .detail-bullet-list li');
-//         for (const item of dateItems) {
-//           const text = item.textContent.trim();
-//           if (dateLabels.some(label => text.includes(label))) {
-//             dateFirstAvailable = text.replace(/(Date First Available|Release date|Publication date)\s*:\s*/i, '').trim();
-//             break;
-//           }
-//         }
-//       }
-//       data.dateFirstAvailable = dateFirstAvailable;
-  
-//       // --- Image URLs ---
-//       let imageUrls = new Set();
-//       // Main image extraction
-//       const mainImageSelectors = ['#landingImage', '#imgBlkFront', '#main-image'];
-//       for (const sel of mainImageSelectors) {
-//         const img = document.querySelector(sel);
-//         if (img) {
-//           let url = img.getAttribute('data-old-hires') || img.getAttribute('src');
-//           if (url) {
-//             url = url.replace(/_S[0-9]+_/, '_SL1500_').replace(/_AC_[^.]+\./, '_AC_SL1500_.');
-//             imageUrls.add(url);
-//           }
-//           break;
-//         }
-//       }
-//       // Additional images extraction
-//       const thumbEls = document.querySelectorAll('#altImages .a-button-thumbnail img, #imageBlockThumbs img, .imageThumbnail img');
-//       thumbEls.forEach(img => {
-//         if (img && !img.src.includes('sprite') && !img.src.includes('gif') && !img.src.includes('play-icon')) {
-//           let url = img.getAttribute('src');
-//           if (url) {
-//             url = url.replace(/_S[0-9]+_/, '_SL1500_')
-//                      .replace(/_AC_[^.]+\./, '_AC_SL1500_.')
-//                      .replace(/\._SS\d+_/, '');
-//             imageUrls.add(url);
-//           }
-//         }
-//       });
-//       data.imageUrls = Array.from(imageUrls);
-  
-//       // --- Keywords (if available) ---
-//       const metaKeywords = document.querySelector('meta[name="keywords"]');
-//       data.keywords = metaKeywords
-//         ? metaKeywords.getAttribute('content').split(',').map(k => k.trim())
-//         : [];
-  
-//       // --- Additional Meta ---
-//       data.url = window.location.href;
-//       data.timestamp = new Date().toISOString();
-  
-//       return data;
-//     } catch (error) {
-//       console.error('Error extracting product data:', error);
-//       return null;
-//     }
-//   };
-  
-//   // Main scraping logic to run on product pages
-//   const scrapeProduct = () => {
-//     if (!isProductPage()) return;
-  
-//     const productData = extractProductData();
-//     if (productData) {
-//       // Send the scraped product data to the extension's background or popup script
-//       chrome.runtime.sendMessage({
-//         type: 'PRODUCT_SCRAPED',
-//         product: productData
-//       });
-//     }
-//   };
-  
-//   // Run scraping when the page loads
-//   if (isProductPage()) {
-//     // Allow time for dynamic content to load
-//     setTimeout(scrapeProduct, 2000);
-//   }
-  
-//   // Listen for URL changes (for SPA navigation)
-//   let lastUrl = location.href;
-//   new MutationObserver(() => {
-//     const url = location.href;
-//     if (url !== lastUrl) {
-//       lastUrl = url;
-//       if (isProductPage()) {
-//         setTimeout(scrapeProduct, 2000);
-//       }
-//     }
-//   }).observe(document, { subtree: true, childList: true });
-  
-
-// // Product page detection
-// const isProductPage = () => {
-//     const path = window.location.pathname;
-//     return path.includes('/dp/') || path.includes('/gp/product/');
-// };
-
-// // Product data extraction
-// const extractProductData = () => {
-//     try {
-//         // Title
-//         const titleElement = document.querySelector('#productTitle');
-//         const title = titleElement ? titleElement.textContent.trim() : '';
-
-//         // Description
-//         let description = '';
-//         const descriptionSelectors = [
-//             '#productDescription p',
-//             '#feature-bullets .a-list-item',
-//             '#aplus',
-//             '.a-expander-content'
-//         ];
-//         for (const selector of descriptionSelectors) {
-//             const element = document.querySelector(selector);
-//             if (element) {
-//                 description += element.textContent.trim() + ' ';
-//             }
-//         }
-//         description = description.trim();
-
-//         // ASIN
-//         let asin = '';
-//         // Try URL first
-//         const urlMatch = window.location.pathname.match(/\/([A-Z0-9]{10})(\/|$|\?)/);
-//         if (urlMatch && urlMatch[1]) {
-//             asin = urlMatch[1];
-//         } else {
-//             // Try page elements
-//             const asinElement = document.querySelector('[name="ASIN"], #ASIN, [data-asin]');
-//             asin = asinElement ? (asinElement.value || asinElement.getAttribute('data-asin')) : '';
-//         }
-
-//         // Price
-//         const priceSelectors = [
-//             '.a-price .a-offscreen',
-//             '#priceblock_ourprice',
-//             '#priceblock_dealprice',
-//             '.a-price .a-price-whole',
-//             '.priceToPay span.a-price-whole',
-//             '.a-section .a-color-price'
-//         ];
-//         let price = '';
-//         for (const selector of priceSelectors) {
-//             const element = document.querySelector(selector);
-//             if (element) {
-//                 price = element.textContent.trim();
-//                 break;
-//             }
-//         }
-
-//         // Ratings and Review Count
-//         const ratingsElement = document.querySelector('#acrPopover');
-//         const ratings = ratingsElement ? ratingsElement.getAttribute('title').replace(' out of 5 stars', '') : '';
-//         const reviewCountElement = document.querySelector('#acrCustomerReviewText');
-//         const reviewCount = reviewCountElement ? reviewCountElement.textContent.replace(/[^0-9]/g, '') : '';
-
-//         // Best Sellers Rank
-//         let bestSellersRank = '';
-//         const rankSelectors = [
-//             '#productDetails_detailBullets_sections1 tr:has(th:contains("Best Sellers Rank"))',
-//             '#detailBullets_feature_div li:has(span:contains("Best Sellers Rank"))',
-//             '#SalesRank',
-//             '.prodDetSectionEntry:contains("Best Sellers Rank")'
-//         ];
-//         for (const selector of rankSelectors) {
-//             const element = document.querySelector(selector);
-//             if (element) {
-//                 bestSellersRank = element.textContent
-//                     .replace(/Best Sellers Rank:|Amazon Best Sellers Rank:|#/g, '')
-//                     .replace(/\s+/g, ' ')
-//                     .trim();
-//                 break;
-//             }
-//         }
-
-//         // Bullet Points
-//         const bulletPoints = [];
-//         const featuresList = document.querySelectorAll('#feature-bullets .a-list-item');
-//         featuresList.forEach(li => {
-//             const text = li.textContent.trim();
-//             if (text && !text.toLowerCase().includes('warranty')) {
-//                 bulletPoints.push(text);
-//             }
-//         });
-
-//         // Brand
-//         const brandSelectors = [
-//             '#bylineInfo',
-//             '.po-brand .a-span9',
-//             '.contributorNameID',
-//             'a#brand',
-//             '#brand'
-//         ];
-//         let brand = '';
-//         for (const selector of brandSelectors) {
-//             const element = document.querySelector(selector);
-//             if (element) {
-//                 brand = element.textContent.trim()
-//                     .replace(/Brand:|Visit the|Store/gi, '')
-//                     .trim();
-//                 break;
-//             }
-//         }
-
-//         // Technical Details
-//         const technicalDetails = {};
-//         const techDetailSelectors = [
-//             '#productDetails_techSpec_section_1 tr',
-//             '#productDetails_techSpec_section_2 tr',
-//             '#technicalSpecifications_section_1 tr',
-//             '#detailBullets_feature_div li'
-//         ];
-//         for (const selector of techDetailSelectors) {
-//             const elements = document.querySelectorAll(selector);
-//             elements.forEach(element => {
-//                 let label, value;
-//                 if (element.tagName === 'TR') {
-//                     label = element.querySelector('th')?.textContent.trim();
-//                     value = element.querySelector('td')?.textContent.trim();
-//                 } else {
-//                     const text = element.textContent.trim();
-//                     const parts = text.split(':');
-//                     if (parts.length === 2) {
-//                         [label, value] = parts.map(p => p.trim());
-//                     }
-//                 }
-//                 if (label && value) {
-//                     technicalDetails[label] = value;
-//                 }
-//             });
-//         }
-
-//         // Customer Reviews
-//         const reviews = [];
-//         const reviewElements = document.querySelectorAll('[data-hook="review"]');
-//         reviewElements.forEach(review => {
-//             const ratingElement = review.querySelector('[data-hook="review-star-rating"], [data-hook="rating-out-of-text"]');
-//             const titleElement = review.querySelector('[data-hook="review-title"]');
-//             const bodyElement = review.querySelector('[data-hook="review-body"]');
-//             const dateElement = review.querySelector('[data-hook="review-date"]');
-//             const verifiedElement = review.querySelector('[data-hook="avp-badge"]');
-
-//             if (bodyElement) {
-//                 reviews.push({
-//                     title: titleElement ? titleElement.textContent.trim() : '',
-//                     rating: ratingElement ? ratingElement.textContent.replace(/[^0-9.]/g, '') : '',
-//                     content: bodyElement.textContent.trim(),
-//                     date: dateElement ? dateElement.textContent.trim() : '',
-//                     verified: verifiedElement ? true : false
-//                 });
-//             }
-//         });
-
-//         // Date First Available
-//         let dateFirstAvailable = '';
-//         const dateSelectors = [
-//             '#productDetails_detailBullets_sections1 tr:has(th:contains("Date First Available"))',
-//             '#detailBullets_feature_div li:has(span:contains("Date First Available"))',
-//             '.prodDetSectionEntry:contains("Date First Available")'
-//         ];
-//         for (const selector of dateSelectors) {
-//             const element = document.querySelector(selector);
-//             if (element) {
-//                 dateFirstAvailable = element.textContent
-//                     .replace(/Date First Available:?/g, '')
-//                     .trim();
-//                 break;
-//             }
-//         }
-
-//         // Image URLs
-//         const imageUrls = new Set();
-//         // Main image
-//         const mainImageSelectors = ['#landingImage', '#imgBlkFront', '#main-image'];
-//         for (const selector of mainImageSelectors) {
-//             const img = document.querySelector(selector);
-//             if (img) {
-//                 let url = img.getAttribute('data-old-hires') || img.getAttribute('src');
-//                 if (url) {
-//                     url = url.replace(/_S[0-9]+_/, '_SL1500_').replace(/_AC_[^.]+\./, '_AC_SL1500_.');
-//                     imageUrls.add(url);
-//                 }
-//                 break;
-//             }
-//         }
-//         // Additional images
-//         const thumbnails = document.querySelectorAll('#altImages .a-button-thumbnail img, #imageBlockThumbs img, .imageThumbnail img');
-//         thumbnails.forEach(img => {
-//             if (img && !img.src.includes('sprite') && !img.src.includes('gif') && !img.src.includes('play-icon')) {
-//                 let url = img.getAttribute('src');
-//                 if (url) {
-//                     url = url.replace(/_S[0-9]+_/, '_SL1500_')
-//                            .replace(/_AC_[^.]+\./, '_AC_SL1500_.')
-//                            .replace(/\._SS\d+_/, '');
-//                     imageUrls.add(url);
-//                 }
-//             }
-//         });
-
-//         return {
-//             title,
-//             description,
-//             asin,
-//             price,
-//             rating: ratings,
-//             review_count: reviewCount,
-//             bestSellersRank,
-//             bulletPoints,
-//             brand,
-//             technicalDetails,
-//             customerReviews: reviews,
-//             imageUrls: Array.from(imageUrls),
-//             dateFirstAvailable,
-//             url: window.location.href,
-//             timestamp: new Date().toISOString()
-//         };
-//     } catch (error) {
-//         console.error('Error extracting product data:', error);
-//         return null;
-//     }
-// };
-
-// // Main scraping logic
-// const scrapeProduct = () => {
-//     if (!isProductPage()) return;
-
-//     const productData = extractProductData();
-//     if (productData) {
-//         chrome.runtime.sendMessage({
-//             type: 'PRODUCT_SCRAPED',
-//             product: productData
-//         });
-//     }
-// };
-
-// // Run scraping when page loads
-// if (isProductPage()) {
-//     // Wait for dynamic content to load
-//     setTimeout(scrapeProduct, 2000);
-// }
-
-// // Listen for URL changes (for SPA navigation)
-// let lastUrl = location.href;
-// new MutationObserver(() => {
-//     const url = location.href;
-//     if (url !== lastUrl) {
-//         lastUrl = url;
-//         if (isProductPage()) {
-//             setTimeout(scrapeProduct, 2000);
-//         }
-//     }
-// }).observe(document, { subtree: true, childList: true }); 
+}).observe(document, { subtree: true, childList: true }); 

@@ -24,6 +24,8 @@ def get_category_key(main: str, sub: str) -> str:
     return f"{main}>{sub}"
 
 # ========== STEP 1: Analyze Product ==========
+PROMPT_BATCH_INTERVAL_SEC = 30  # seconds
+PROMPT_BATCH_SIZE = 2
 
 async def analyze_product(product_id: str, user_id: str) -> Dict[str, Any]:
     products = get_collection(MongoDBCollections.PRODUCTS)
@@ -65,44 +67,211 @@ async def analyze_product(product_id: str, user_id: str) -> Dict[str, Any]:
 
     analysis_results = {}
 
-    async def run_prompt(block):
-        try:
-            result = await use_stored_prompt(
-                prompt_id=block["id"],
-                input_data=input_data,
-                user_id=user_id
-            )
+    for i in range(0, len(active_blocks), PROMPT_BATCH_SIZE):
+        batch = active_blocks[i:i + PROMPT_BATCH_SIZE]
+        for block in batch:
+            try:
+                result = await use_stored_prompt(
+                    prompt_id=block["id"],
+                    input_data=input_data,
+                    user_id=user_id
+                )
+                if result.get("success") and result.get("response"):
+                    if len(result["response"]) < 200:
+                        print(f"Result is too short, rerunning prompt {block['id']}")
+                        result = await use_stored_prompt(
+                            prompt_id=block["id"],
+                            input_data=input_data,
+                            user_id=user_id
+                        )
 
-            # Summarize analysis for master recipe use
-            summary = await summarize_analysis_output(result, user_id)
+                # summary = await summarize_analysis_output(result, user_id)
+                summary = result["response"]
 
-            doc = {
-                "id": str(uuid.uuid4()),
-                "product_id": product_id,
-                "prompt_block_id": block["id"],
-                "user_id": user_id,
-                "input_data": input_data,
-                "output": result,
-                "summary": summary,
-                "model": settings.DEFAULT_LLM_MODEL,
-                "duration_ms": 0,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-                "category": main_category,
-                "subcategory": subcategory
-            }
-            await analysis.insert_one(doc)
-            analysis_results[block["block_title"]] = result
-        except Exception as e:
-            logger.error(f"Error analyzing prompt {block['id']}: {e}")
-            analysis_results[block["block_title"]] = f"Error: {str(e)}"
+                doc = {
+                    "id": str(uuid.uuid4()),
+                    "product_id": product_id,
+                    "prompt_block_id": block["id"],
+                    "user_id": user_id,
+                    "input_data": input_data,
+                    "output": result,
+                    "summary": summary,
+                    "model": settings.DEFAULT_LLM_MODEL,
+                    "duration_ms": 0,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "category": main_category,
+                    "subcategory": subcategory
+                }
+                await analysis.insert_one(doc)
+                analysis_results[block["block_title"]] = result
+            except Exception as e:
+                logger.error(f"Error analyzing prompt {block['id']}: {e}")
+                analysis_results[block["block_title"]] = f"Error: {str(e)}"
 
-    await asyncio.gather(*(run_prompt(b) for b in active_blocks))
+        if i + PROMPT_BATCH_SIZE < len(active_blocks):
+            logger.info(f"Sleeping for {PROMPT_BATCH_INTERVAL_SEC}s before next prompt batch...")
+            await asyncio.sleep(PROMPT_BATCH_INTERVAL_SEC)
 
     await products.update_one(
         {"id": product_id},
         {"$set": {"analysis_results": analysis_results, "updated_at": datetime.utcnow()}}
     )
+
+# async def analyze_product(product_id: str, user_id: str) -> Dict[str, Any]:
+#     products = get_collection(MongoDBCollections.PRODUCTS)
+#     prompts = get_collection(MongoDBCollections.PROMPTS)
+#     analysis = get_collection(MongoDBCollections.ANALYSIS)
+
+#     product = await products.find_one({"id": product_id})
+#     if not product:
+#         raise ValueError("Product not found")
+
+#     category_hierarchy = product.get("category_hierarchy", {})
+#     main_category = category_hierarchy.get("main_category")
+#     sub_categories = category_hierarchy.get("sub_categories", [])
+#     if not main_category or not sub_categories:
+#         raise ValueError("Category hierarchy incomplete")
+
+#     subcategory = sub_categories[-1]
+#     category_key = get_category_key(main_category, subcategory)
+
+#     if category_key not in category_locks:
+#         category_locks[category_key] = asyncio.Lock()
+
+#     active_blocks = await prompts.find({
+#         "is_active": True,
+#         "prompt_category": "competitor_analysis"
+#     }).to_list(length=100)
+
+#     input_data = {
+#         "product_data": {
+#             "title": product.get("title"),
+#             "description": product.get("description"),
+#             "price": product.get("price"),
+#             "features": product.get("features"),
+#             "rating": product.get("rating"),
+#             "review_count": product.get("review_count"),
+#             "category": category_hierarchy
+#         }
+#     }
+
+#     analysis_results = {}
+
+#     for block in active_blocks:
+#         try:
+#             result = await use_stored_prompt(
+#                 prompt_id=block["id"],
+#                 input_data=input_data,
+#                 user_id=user_id
+#             )
+
+#             summary = await summarize_analysis_output(result, user_id)
+
+#             doc = {
+#                 "id": str(uuid.uuid4()),
+#                 "product_id": product_id,
+#                 "prompt_block_id": block["id"],
+#                 "user_id": user_id,
+#                 "input_data": input_data,
+#                 "output": result,
+#                 "summary": summary,
+#                 "model": settings.DEFAULT_LLM_MODEL,
+#                 "duration_ms": 0,
+#                 "created_at": datetime.utcnow(),
+#                 "updated_at": datetime.utcnow(),
+#                 "category": main_category,
+#                 "subcategory": subcategory
+#             }
+#             await analysis.insert_one(doc)
+#             analysis_results[block["block_title"]] = result
+#         except Exception as e:
+#             logger.error(f"Error analyzing prompt {block['id']}: {e}")
+#             analysis_results[block["block_title"]] = f"Error: {str(e)}"
+
+#     await products.update_one(
+#         {"id": product_id},
+#         {"$set": {"analysis_results": analysis_results, "updated_at": datetime.utcnow()}}
+#     )
+
+# async def analyze_product(product_id: str, user_id: str) -> Dict[str, Any]:
+#     products = get_collection(MongoDBCollections.PRODUCTS)
+#     prompts = get_collection(MongoDBCollections.PROMPTS)
+#     analysis = get_collection(MongoDBCollections.ANALYSIS)
+
+#     product = await products.find_one({"id": product_id})
+#     if not product:
+#         raise ValueError("Product not found")
+
+#     category_hierarchy = product.get("category_hierarchy", {})
+#     main_category = category_hierarchy.get("main_category")
+#     sub_categories = category_hierarchy.get("sub_categories", [])
+#     if not main_category or not sub_categories:
+#         raise ValueError("Category hierarchy incomplete")
+
+#     subcategory = sub_categories[-1]
+#     category_key = get_category_key(main_category, subcategory)
+
+#     if category_key not in category_locks:
+#         category_locks[category_key] = asyncio.Lock()
+
+#     active_blocks = await prompts.find({
+#         "is_active": True,
+#         "prompt_category": "competitor_analysis"
+#     }).to_list(length=100)
+
+#     input_data = {
+#         "product_data": {
+#             "title": product.get("title"),
+#             "description": product.get("description"),
+#             "price": product.get("price"),
+#             "features": product.get("features"),
+#             "rating": product.get("rating"),
+#             "review_count": product.get("review_count"),
+#             "category": category_hierarchy
+#         }
+#     }
+
+#     analysis_results = {}
+
+#     async def run_prompt(block):
+#         try:
+#             result = await use_stored_prompt(
+#                 prompt_id=block["id"],
+#                 input_data=input_data,
+#                 user_id=user_id
+#             )
+
+#             # Summarize analysis for master recipe use
+#             summary = await summarize_analysis_output(result, user_id)
+
+#             doc = {
+#                 "id": str(uuid.uuid4()),
+#                 "product_id": product_id,
+#                 "prompt_block_id": block["id"],
+#                 "user_id": user_id,
+#                 "input_data": input_data,
+#                 "output": result,
+#                 "summary": summary,
+#                 "model": settings.DEFAULT_LLM_MODEL,
+#                 "duration_ms": 0,
+#                 "created_at": datetime.utcnow(),
+#                 "updated_at": datetime.utcnow(),
+#                 "category": main_category,
+#                 "subcategory": subcategory
+#             }
+#             await analysis.insert_one(doc)
+#             analysis_results[block["block_title"]] = result
+#         except Exception as e:
+#             logger.error(f"Error analyzing prompt {block['id']}: {e}")
+#             analysis_results[block["block_title"]] = f"Error: {str(e)}"
+
+#     await asyncio.gather(*(run_prompt(b) for b in active_blocks))
+
+#     await products.update_one(
+#         {"id": product_id},
+#         {"$set": {"analysis_results": analysis_results, "updated_at": datetime.utcnow()}}
+#     )
 
     # ========== STEP 2: Queue product in memory ==========
 
@@ -180,33 +349,6 @@ async def check_and_generate_master_recipes(category: str, subcategory: str, use
         await create_master_recipe(block, category, subcategory, user_id)
 
 
-# async def check_and_generate_master_recipes(category: str, subcategory: str, user_id: str):
-#     products = get_collection(MongoDBCollections.PRODUCTS)
-#     analysis = get_collection(MongoDBCollections.ANALYSIS)
-#     prompts = get_collection(MongoDBCollections.PROMPTS)
-
-#     total = await products.count_documents({
-#         "category_hierarchy.main_category": category,
-#         "category_hierarchy.sub_categories": subcategory
-#     })
-
-#     analyzed_ids = await analysis.distinct("product_id", {
-#         "category": category,
-#         "subcategory": subcategory
-#     })
-#     print(f"Analyzed IDs: {analyzed_ids}")
-#     print(f"Total: {total}")
-#     if len(analyzed_ids) < total:
-#         return
-
-#     prompt_blocks = await prompts.find({
-#         "is_active": True,
-#         "prompt_category": "competitor_analysis"
-#     }).to_list(length=100)
-
-#     for block in prompt_blocks:
-#         await create_master_recipe(block, category, subcategory, user_id)
-
 # ========== STEP 4: Create Master Recipe for Block ==========
 
 async def create_master_recipe(block: Dict[str, Any], category: str, subcategory: str, user_id: str):
@@ -235,11 +377,11 @@ async def create_master_recipe(block: Dict[str, Any], category: str, subcategory
             "master_recipe_check": True,
             "master_recipe_prompt": block.get("master_recipe_prompt")
         },
-        # "analysis_results": [a["output"] for a in analyses]
-        "analysis_results": [
-            a.get("summary") or a.get("output", "")[:300]
-            for a in analyses[:100]  # Limit to first 100 for prompt safety
-        ]
+        "analysis_results": [a["output"] for a in analyses]
+        # "analysis_results": [
+        #     a.get("summary") or a.get("output", "")[:300]
+        #     for a in analyses[:100]  # Limit to first 100 for prompt safety
+        # ]
     }
 
     result = await use_stored_prompt(
@@ -247,6 +389,15 @@ async def create_master_recipe(block: Dict[str, Any], category: str, subcategory
         input_data=input_data,
         user_id=user_id
     )
+
+    if result.get("success") and result.get("response"):
+        if len(result["response"]) < 200:
+            print(f"Result is too short, rerunning master recipe prompt {block['id']}")
+            result = await use_stored_prompt(
+                prompt_id=block["id"],
+                input_data=input_data,
+                user_id=user_id
+            )
 
     doc = {
         "id": str(uuid.uuid4()),
@@ -261,6 +412,105 @@ async def create_master_recipe(block: Dict[str, Any], category: str, subcategory
     }
     await master.insert_one(doc)
     logger.info(f"Created master recipe for {category} > {subcategory} [block: {block['id']}]")
+
+
+# ========== Market Research Analysis ==========
+
+async def perform_market_research_analysis(product_id: str, user_id: str, prompt_block_id: str) -> Dict[str, Any]:
+    """
+    Perform market research analysis for a specific product using the specified prompt.
+    
+    Args:
+        product_id: The ID of the product to analyze
+        user_id: The ID of the user who owns the product
+        prompt_block_id: The ID of the prompt block to use for analysis
+        
+    Returns:
+        Dict containing the analysis results
+    """
+    products = get_collection(MongoDBCollections.PRODUCTS)
+    prompts = get_collection(MongoDBCollections.PROMPTS)
+    analysis = get_collection(MongoDBCollections.ANALYSIS)
+    
+    # Get the product
+    product = await products.find_one({"id": product_id})
+    if not product:
+        logger.error(f"Product not found: {product_id}")
+        return {"error": "Product not found"}
+    
+    # Get the prompt block
+    prompt_block = await prompts.find_one({"id": prompt_block_id})
+    if not prompt_block:
+        logger.error(f"Prompt block not found: {prompt_block_id}")
+        return {"error": "Prompt block not found"}
+    
+    logger.info(f"Starting market research analysis for product {product_id} with prompt {prompt_block_id}")
+    
+    # Prepare input data for the LLM
+    input_data = {
+        "product_data": {
+            "title": product.get("title", ""),
+            "description": product.get("description", ""),
+            "price": product.get("price", ""),
+            "features": product.get("features", []),
+            "rating": product.get("rating", 0),
+            "review_count": product.get("review_count", 0),
+            "category": product.get("category_hierarchy", {})
+        }
+    }
+    
+    try:
+        # Use the stored prompt to analyze the product
+        result = await use_stored_prompt(
+            prompt_id=prompt_block_id,
+            input_data=input_data,
+            user_id=user_id
+        )
+        
+        # Create an analysis document
+        analysis_doc = {
+            "id": str(uuid.uuid4()),
+            "product_id": product_id,
+            "prompt_block_id": prompt_block_id,
+            "user_id": user_id,
+            "input_data": input_data,
+            "output": result,
+            "model": settings.DEFAULT_LLM_MODEL,
+            "duration_ms": result.get("duration_ms", 0),
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        # Store the analysis
+        await analysis.insert_one(analysis_doc)
+        
+        # Update the product with some analysis information
+        await products.update_one(
+            {"id": product_id},
+            {"$set": {
+                "analysis_status": "completed",
+                "analyzed_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        logger.info(f"Market research analysis completed for product {product_id}")
+        return analysis_doc
+        
+    except Exception as e:
+        logger.error(f"Error performing market research analysis: {str(e)}")
+        
+        # Update the product with error status
+        await products.update_one(
+            {"id": product_id},
+            {"$set": {
+                "analysis_status": "error",
+                "analysis_error": str(e),
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        return {"error": str(e)}
 
 
 

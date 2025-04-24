@@ -55,7 +55,7 @@ const ProjectDetails: React.FC = () => {
       console.log('Fetching project with ID:', id);
 
       // Fetch project details first
-      const projectResponse = await api.get(`/api/v1/projects/${id}`);
+      const projectResponse = await api.get(`/projects/${id}`);
       console.log('Project response:', projectResponse.data);
 
       if (!projectResponse.data) {
@@ -74,7 +74,7 @@ const ProjectDetails: React.FC = () => {
       });
 
       // Fetch products
-      const productsResponse = await api.get(`/api/v1/projects/${id}/products/list`);
+      const productsResponse = await api.get(`/projects/${id}/products/list`);
       console.log('Products response:', productsResponse.data);
 
       // Handle products array
@@ -105,7 +105,7 @@ const ProjectDetails: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.put(`/api/v1/projects/${id}`, formData);
+      await api.put(`/projects/${id}`, formData);
       setShowForm(false);
       fetchProjectDetails();
     } catch (err) {
@@ -117,7 +117,7 @@ const ProjectDetails: React.FC = () => {
   const handleDelete = async () => {
     if (window.confirm('Are you sure you want to delete this project?')) {
       try {
-        await api.delete(`/api/v1/projects/${id}`);
+        await api.delete(`/projects/${id}`);
         navigate('/projects');
       } catch (err) {
         setError('Failed to delete project');

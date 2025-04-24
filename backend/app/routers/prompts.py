@@ -154,7 +154,7 @@ async def update_prompt_block(
         "output_example": prompt_data.output_example,
         "rerun_on_existing": prompt_data.rerun_on_existing,
         "is_active": prompt_data.is_active if prompt_data.is_active is not None else prompt["is_active"],
-        "master_recipe": prompt_data.master_recipe,
+        "master_recipe_prompt": prompt_data.master_recipe_prompt,
         "limit": prompt_data.limit,
         "skip": prompt_data.skip,
         "sort_field": prompt_data.sort_field,

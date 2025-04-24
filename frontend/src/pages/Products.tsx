@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { api } from '../utils/api';
 import { formatDate } from '../utils/date';
@@ -20,9 +21,11 @@ interface Product {
   customer_reviews: string[];
   created_at: string;
   updated_at: string;
+  analysis_results?: Record<string, any>[];
 }
 
 const Products: React.FC = () => {
+  const navigate = useNavigate();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +127,14 @@ const Products: React.FC = () => {
         console.error('Error deleting product:', err);
       }
     }
+  };
+
+  const handleView = (id: string) => {
+    navigate(`/products/detail/${id}`);
+  };
+
+  const handleRowClick = (id: string) => {
+    navigate(`/products/detail/${id}`);
   };
 
   return (
@@ -308,8 +319,12 @@ const Products: React.FC = () => {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {products.map((product) => (
-                  <tr key={product.id}>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                  <tr 
+                    key={product.id} 
+                    onClick={() => handleRowClick(product.id)}
+                    className="cursor-pointer hover:bg-gray-50"
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                       <img
                         src={product.image_url}
                         alt={product.title}
@@ -337,15 +352,30 @@ const Products: React.FC = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {formatDate(product.created_at)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" onClick={(e) => e.stopPropagation()}>
                       <button
-                        onClick={() => handleEdit(product)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleView(product.id);
+                        }}
+                        className="text-blue-600 hover:text-blue-900 mr-3"
+                      >
+                        View
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEdit(product);
+                        }}
                         className="text-blue-600 hover:text-blue-900 mr-3"
                       >
                         Edit
                       </button>
                       <button
-                        onClick={() => handleDelete(product.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(product.id);
+                        }}
                         className="text-red-600 hover:text-red-900"
                       >
                         Delete

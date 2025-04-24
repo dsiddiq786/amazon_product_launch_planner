@@ -1,78 +1,122 @@
 # Product Launch Planner Chrome Extension
 
-A Chrome extension for scraping and analyzing Amazon products to help with product launches.
+A Chrome extension that helps you scrape and analyze Amazon products for your product launch planning.
 
 ## Features
 
-- 🔐 Secure authentication with JWT
-- 📦 Project management (create, select, view)
-- 🛍️ Automatic product data scraping from Amazon
-- 📊 Real-time product data display
-- 🤖 AI-powered product analysis
-- 🔄 Persistent session management
+- Scrape product data from Amazon product pages
+- Extract detailed product information including:
+  - Title, description, and brand
+  - Price and ratings
+  - Best sellers rank
+  - Bullet points and features
+  - Category hierarchy
+  - Product images
+- Save products to your projects
+- Analyze products using AI-powered insights
+- Generate success recipes based on product analysis
 
 ## Installation
 
-1. Clone this repository
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable "Developer mode" in the top right
-4. Click "Load unpacked" and select the `chrome-extension` directory
+1. Clone this repository:
+```bash
+git clone https://github.com/yourusername/product-launch-planner.git
+cd product-launch-planner/chrome-extension
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Build the extension:
+```bash
+npm run build
+```
+
+4. Load the extension in Chrome:
+   - Open Chrome and go to `chrome://extensions/`
+   - Enable "Developer mode" in the top right
+   - Click "Load unpacked" and select the `chrome-extension` directory
+
+## Usage
+
+1. **Authentication**
+   - Click the extension icon in your Chrome toolbar
+   - Sign in with your Product Launch Planner account
+   - If you don't have an account, create one at [your-website.com](https://your-website.com)
+
+2. **Project Management**
+   - Create a new project or select an existing one
+   - Each project can contain multiple products for analysis
+
+3. **Product Scraping**
+   - Navigate to any Amazon product page
+   - Click the extension icon
+   - Click "Scrape Product Data"
+   - The product data will be automatically saved to your current project
+
+4. **Analysis**
+   - View scraped products in your project
+   - Run AI analysis on products
+   - Generate success recipes based on product insights
 
 ## Development
-
-The extension is built with:
-- Manifest V3
-- Vanilla JavaScript
-- Tailwind CSS for styling
-- Chrome Extension APIs
 
 ### Project Structure
 
 ```
 chrome-extension/
-├── manifest.json          # Extension configuration
 ├── src/
-│   ├── popup.html        # Popup UI
-│   ├── popup.js          # Popup logic
-│   ├── content.js        # Content script for scraping
-│   ├── background.js     # Background script
-│   └── assets/           # Icons and images
-└── README.md             # Documentation
+│   ├── content.js      # Content script for product scraping
+│   ├── background.js   # Background script for extension logic
+│   ├── popup.html      # Extension popup UI
+│   ├── popup.js        # Popup UI logic
+│   └── css/
+│       ├── tailwind.min.css  # Tailwind CSS framework
+│       └── styles.css        # Custom styles
+├── manifest.json       # Extension configuration
+└── README.md          # Documentation
 ```
 
-### API Integration
+### Building
 
-The extension integrates with the Product Launch Planner backend API:
+1. Install dependencies:
+```bash
+npm install
+```
 
-- Authentication: `/auth/login/json`
-- Projects: `/projects`
-- Products: `/products`
-- Analysis: `/products/project/{project_id}/master-recipe`
+2. Build the extension:
+```bash
+npm run build
+```
 
-## Usage
+3. Watch for changes during development:
+```bash
+npm run watch
+```
 
-1. Click the extension icon to open the popup
-2. Log in with your credentials
-3. Select an existing project or create a new one
-4. Browse Amazon product pages
-5. The extension will automatically scrape product data
-6. Once 10 products are collected, click "Analyze Products"
-7. View the analysis results in the admin panel
+### Testing
 
-## Security
+1. Load the extension in Chrome:
+   - Go to `chrome://extensions/`
+   - Enable "Developer mode"
+   - Click "Load unpacked" and select the `chrome-extension` directory
 
-- JWT tokens are securely stored in `chrome.storage.local`
-- All API requests include proper authentication headers
-- Sensitive data is never stored in plain text
+2. Test the extension:
+   - Navigate to an Amazon product page
+   - Click the extension icon
+   - Verify that product data is scraped correctly
+   - Check that data is saved to your project
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -am 'Add your feature'`
+4. Push to the branch: `git push origin feature/your-feature`
+5. Submit a pull request
 
 ## License
 
-MIT License - see LICENSE file for details 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 

@@ -165,7 +165,7 @@ class PromptBlockInput(BaseModel):
     skip: Optional[int] = None
     sort_field: Optional[str] = "created_at"
     sort_order: Optional[str] = "desc"
-    master_recipe: Optional[str] = None
+    master_recipe_prompt: Optional[str] = None
 
 
 class AnalysisResult(MongoBaseModel):
@@ -223,6 +223,33 @@ class AnalysisTask(MongoBaseModel):
                 "completed_at": "2023-01-01T00:01:30",
                 "created_at": "2023-01-01T00:00:00",
                 "updated_at": "2023-01-01T00:01:30"
+            }
+        }
+    )
+
+
+class CategoryGroup(BaseModel):
+    """Model representing a group of recipes by category and subcategory"""
+    category: str
+    subcategory: str
+    recipe: Recipe
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "category": "Home & Kitchen",
+                "subcategory": "Cookware",
+                "recipe": {
+                    "id": "123e4567-e89b-12d3-a456-426614174000",
+                    "user_id": "123e4567-e89b-12d3-a456-426614174002",
+                    "title": "Category Recipe for Cookware",
+                    "content": "This is a category recipe for cookware...",
+                    "category": "Home & Kitchen",
+                    "subcategory": "Cookware",
+                    "is_master": True,
+                    "created_at": "2023-01-01T00:00:00",
+                    "updated_at": "2023-01-01T00:00:00"
+                }
             }
         }
     ) 

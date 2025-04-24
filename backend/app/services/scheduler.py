@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Set
 
 from app.database.mongodb import get_collection, MongoDBCollections
-from app.services.analysis import analyze_product, check_and_generate_master_recipes
+from app.services.analysis import analyze_product, check_and_generate_master_recipes, perform_market_research_analysis
 from app.services.competitor_analysis import process_product_analysis
 
 logger = logging.getLogger(__name__)
@@ -20,13 +20,15 @@ category_task_locks: Dict[str, asyncio.Lock] = {}  # category_key -> asyncio.Loc
 class AnalysisTask:
     """Class to represent a product analysis task"""
     def __init__(self, product_id: str, user_id: str, project_id: str, 
-                 scheduled_time: datetime, task_id: str, task_type: str = "standard_analysis"):
+                 scheduled_time: datetime, task_id: str, task_type: str = "standard_analysis",
+                 prompt_block_id: str = None):
         self.product_id = product_id
         self.user_id = user_id
         self.project_id = project_id
         self.scheduled_time = scheduled_time
         self.task_id = task_id
-        self.task_type = task_type  # "standard_analysis" or "competitor_analysis"
+        self.task_type = task_type  # "standard_analysis", "competitor_analysis", or "market_research"
+        self.prompt_block_id = prompt_block_id  # Only needed for market_research
         self.executed = False
         self.success = False
         self.error = None
@@ -48,7 +50,8 @@ class AnalysisScheduler:
         return cls._instance
 
     async def schedule_task(self, product_id: str, user_id: str, project_id: str, 
-                           delay_seconds: int = 0, task_type: str = "standard_analysis") -> str:
+                           delay_seconds: int = 0, task_type: str = "standard_analysis",
+                           prompt_block_id: str = None) -> str:
         """
         Schedule a new product analysis task
         """
@@ -60,7 +63,8 @@ class AnalysisScheduler:
             project_id=project_id,
             scheduled_time=scheduled_time,
             task_id=task_id,
-            task_type=task_type
+            task_type=task_type,
+            prompt_block_id=prompt_block_id
         )
 
         self.tasks[task_id] = task
@@ -144,7 +148,33 @@ class AnalysisScheduler:
                             ),
                             timeout=self.timeout
                         )
+                    elif task.task_type == "market_research":
+                        # For market research, we need the prompt block ID as well
+                        prompt_block_id = getattr(task, "prompt_block_id", None)
+                        if not prompt_block_id:
+                            # If prompt_block_id wasn't included in the task, try to retrieve it
+                            prompts_collection = get_collection(MongoDBCollections.PROMPTS)
+                            cursor = prompts_collection.find({
+                                "prompt_category": "market_research",
+                                "is_active": True
+                            }).sort("created_at", -1).limit(1)
+                            
+                            market_research_prompt = await cursor.to_list(length=1)
+                            if market_research_prompt:
+                                prompt_block_id = market_research_prompt[0]["id"]
+                            else:
+                                raise ValueError("No active market research prompt found")
+                        
+                        result = await asyncio.wait_for(
+                            perform_market_research_analysis(
+                                product_id=task.product_id,
+                                user_id=task.user_id,
+                                prompt_block_id=prompt_block_id
+                            ),
+                            timeout=self.timeout
+                        )
                     else:
+                        # Default to standard analysis
                         result = await asyncio.wait_for(
                             analyze_product(
                                 product_id=task.product_id,
@@ -208,21 +238,25 @@ class AnalysisScheduler:
         """Update task status in database"""
         tasks_collection = get_collection(MongoDBCollections.ANALYSIS_TASKS)
 
+        task_data = {
+            "executed": task.executed,
+            "success": task.success,
+            "error": task.error,
+            "task_type": task.task_type,
+            "product_id": task.product_id,
+            "user_id": task.user_id,
+            "project_id": task.project_id,
+            "scheduled_time": task.scheduled_time,
+            "completed_at": datetime.utcnow() if task.executed else None
+        }
+        
+        # Only include prompt_block_id if it exists
+        if task.prompt_block_id:
+            task_data["prompt_block_id"] = task.prompt_block_id
+
         await tasks_collection.update_one(
             {"task_id": task.task_id},
-            {
-                "$set": {
-                    "executed": task.executed,
-                    "success": task.success,
-                    "error": task.error,
-                    "task_type": task.task_type,
-                    "product_id": task.product_id,
-                    "user_id": task.user_id,
-                    "project_id": task.project_id,
-                    "scheduled_time": task.scheduled_time,
-                    "completed_at": datetime.utcnow() if task.executed else None
-                }
-            },
+            {"$set": task_data},
             upsert=True
         )
 
@@ -232,7 +266,7 @@ class AnalysisScheduler:
         """
         if task_id in self.tasks:
             task = self.tasks[task_id]
-            return {
+            status_data = {
                 "task_id": task.task_id,
                 "product_id": task.product_id,
                 "user_id": task.user_id,
@@ -243,6 +277,12 @@ class AnalysisScheduler:
                 "success": task.success,
                 "error": task.error
             }
+            
+            # Only include prompt_block_id if it exists
+            if task.prompt_block_id:
+                status_data["prompt_block_id"] = task.prompt_block_id
+            
+            return status_data
 
         tasks_collection = get_collection(MongoDBCollections.ANALYSIS_TASKS)
         return await tasks_collection.find_one({"task_id": task_id})

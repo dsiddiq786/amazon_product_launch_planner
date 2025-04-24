@@ -4,138 +4,270 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Product Launch Planner</title>
-    <link rel="stylesheet" href="css/tailwind.min.css">
-    <link rel="stylesheet" href="css/styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            width: 320px;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            color: #333;
+            background-color: #f5f7fa;
+        }
+        
+        h1, h2, h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        
+        .container {
+            padding: 16px;
+        }
+        
+        .section {
+            margin-bottom: 16px;
+            background-color: white;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Form Elements */
+        input, button {
+            width: 100%;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            box-sizing: border-box;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        /* User Profile */
+        .user-profile {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #3498db;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            font-weight: bold;
+            overflow: hidden;
+        }
+        
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        /* Stats Section */
+        .stats {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        
+        .stat-item {
+            flex: 1;
+            padding: 8px;
+        }
+        
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        
+        /* Product Section */
+        .product-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .product-image {
+            width: 80px;
+            height: 80px;
+            object-fit: contain;
+            margin-right: 12px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+        
+        .product-details {
+            flex: 1;
+        }
+        
+        .product-title {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        
+        .product-price, .product-asin {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-bottom: 2px;
+        }
+        
+        /* Status */
+        .status {
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        
+        .scraping {
+            background-color: #f39c12;
+            color: white;
+        }
+        
+        .success {
+            background-color: #2ecc71;
+            color: white;
+        }
+        
+        .error {
+            background-color: #e74c3c;
+            color: white;
+        }
+        
+        /* Header */
+        .header {
+            background-color: #3498db;
+            color: white;
+            padding: 16px;
+            text-align: center;
+            border-radius: 0 0 8px 8px;
+            margin-bottom: 16px;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #95a5a6;
+            margin-top: 16px;
+        }
+        
+        /* Dashboard Button */
+        .dashboard-btn {
+            background-color: #2ecc71;
+            margin-top: 8px;
+        }
+        
+        .dashboard-btn:hover {
+            background-color: #27ae60;
+        }
+    </style>
 </head>
-<body class="bg-gray-50">
+<body>
+    <div class="header">
+        <h1 id="app-title">Product Launch Planner</h1>
+    </div>
+    
     <div class="container">
-        <!-- Auth Section -->
-        <div id="authSection" class="hidden">
-            <div class="card p-6 space-y-4">
-                <h2 class="text-center">Welcome Back</h2>
-                <form id="loginForm" class="space-y-4">
-                    <div>
-                        <label for="email">Email Address</label>
-                        <input type="email" id="email" placeholder="Enter your email" required>
-                    </div>
-                    <div>
-                        <label for="password">Password</label>
-                        <input type="password" id="password" placeholder="Enter your password" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-full">Sign In</button>
-                </form>
-                <div id="loginMessage" class="status-message hidden"></div>
-            </div>
+        <!-- Authentication Section -->
+        <div id="auth-section" class="section">
+            <h2>Login</h2>
+            <form id="login-form">
+                <input type="email" id="email" placeholder="Email" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button type="submit">Login</button>
+            </form>
         </div>
-
-        <!-- Main Section -->
-        <div id="mainSection" class="hidden">
-            <!-- User Info -->
-            <div class="user-info">
-                <div class="flex items-center space-x-3">
-                    <div id="userAvatar" class="user-avatar"></div>
-                    <span id="userEmail" class="text-sm font-medium"></span>
-                </div>
-                <button id="logoutBtn" class="btn btn-secondary">Logout</button>
-            </div>
-
-            <!-- Project Section -->
-            <div class="card p-4 mb-4">
-                <div class="flex justify-between items-center mb-4">
-                    <h3>Select Project</h3>
-                    <button id="createProjectBtn" class="btn btn-primary">New Project</button>
-                </div>
-                <select id="projectSelect" class="mb-4">
-                    <option value="">Select a project</option>
-                </select>
-            </div>
-
-            <!-- New Project Form -->
-            <div id="newProjectForm" class="card p-4 mb-4 hidden">
-                <h3 class="mb-4">Create New Project</h3>
-                <div class="space-y-4">
-                    <div>
-                        <label for="projectName">Project Name</label>
-                        <input type="text" id="projectName" placeholder="Enter project name">
+        
+        <!-- Main Section (visible after login) -->
+        <div id="main-section" style="display: none;">
+            <!-- User Profile -->
+            <div class="section">
+                <div class="user-profile">
+                    <div class="avatar">
+                        <img id="user-avatar" src="" alt="Avatar">
                     </div>
                     <div>
-                        <label for="projectCategory">Category</label>
-                        <input type="text" id="projectCategory" placeholder="Enter category">
+                        <h3>Welcome!</h3>
+                        <div id="user-email">user@example.com</div>
                     </div>
-                    <div>
-                        <label for="projectSubcategory">Subcategory</label>
-                        <input type="text" id="projectSubcategory" placeholder="Enter subcategory">
-                    </div>
-                    <div class="flex justify-end space-x-2">
-                        <button id="cancelProjectBtn" class="btn btn-secondary">Cancel</button>
-                        <button id="saveProjectBtn" class="btn btn-primary">Create Project</button>
+                    <button id="logout-btn" style="width: auto; margin-left: auto;">Logout</button>
+                </div>
+                
+                <!-- User Stats - Single Stat for Analyzed Products -->
+                <div class="stats">
+                    <div class="stat-item">
+                        <div class="stat-number" id="total-analyzed">0</div>
+                        <div class="stat-label">Analyzed Products</div>
                     </div>
                 </div>
+                
+                <!-- Dashboard Button -->
+                <button id="dashboard-btn" class="dashboard-btn">Open Dashboard</button>
             </div>
-
+            
             <!-- Product Section -->
-            <div id="productSection" class="hidden">
-                <!-- Not Product Page Message -->
-                <div id="notProductPage" class="card p-4 mb-4">
-                    <p class="text-center text-gray-600">Please navigate to an Amazon product page to start scraping.</p>
-                </div>
-
-                <!-- Product Page Content -->
-                <div id="productPage" class="hidden">
-                    <div class="card p-4 mb-4">
-                        <button id="scrapeBtn" class="btn btn-primary w-full">
-                            Scrape Product Data
-                        </button>
-                    </div>
-
-                    <!-- Current Product Info -->
-                    <div id="productInfo" class="card hidden">
-                        <div class="product-info">
-                            <img id="productImage" class="product-image" src="" alt="Product Image">
-                            <div class="product-details">
-                                <h4 id="productTitle" class="product-title"></h4>
-                                <div class="product-meta space-y-1">
-                                    <p id="productBrand"></p>
-                                    <p id="productPrice"></p>
-                                    <p id="productAsin"></p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Status Message -->
-                    <div id="statusMessage" class="status-message hidden"></div>
-
-                    <!-- Scraped Products List -->
-                    <div id="scrapedProductsList" class="card">
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Image</th>
-                                        <th>Basic Info</th>
-                                        <th>Rankings</th>
-                                        <th>Description</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="productsTableBody">
-                                    <!-- Products will be dynamically inserted here -->
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="table-footer">
-                            <div class="bulk-actions">
-                                <button id="saveAllBtn" class="action-btn save-btn">Save All</button>
-                                <button id="clearScrapedDataBtn" class="action-btn remove-btn">Clear All</button>
-                            </div>
-                        </div>
+            <div class="section" id="product-section" style="display: none;">
+                <h2>Current Product</h2>
+                <div id="product-status" class="status">Ready to analyze</div>
+                
+                <div class="product-info">
+                    <img id="product-image" class="product-image" src="https://via.placeholder.com/150?text=No+Image" alt="Product Image">
+                    <div class="product-details">
+                        <div id="product-title" class="product-title">Product Title</div>
+                        <div id="product-price" class="product-price">Price</div>
+                        <div id="product-asin" class="product-asin">ASIN</div>
                     </div>
                 </div>
+                
+                <!-- Dynamic button that changes based on product analysis status -->
+                <button id="analyze-btn">Analyze Product</button>
+                <button id="report-btn" style="display: none; background-color: #f39c12;">Show Report</button>
+            </div>
+            
+            <!-- Not Product Page Message -->
+            <div class="section" id="not-product-page">
+                <h2>Not a Product Page</h2>
+                <p>Please navigate to an Amazon product page to analyze products.</p>
             </div>
         </div>
     </div>
+    
+    <div class="footer">
+        <p>© 2023 Product Launch Planner</p>
+    </div>
+    
     <script src="popup.js"></script>
 </body>
 </html> 

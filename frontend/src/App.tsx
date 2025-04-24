@@ -11,6 +11,7 @@ import Prompts from './pages/Prompts';
 import Projects from './pages/Projects';
 import ProjectDetails from './pages/ProjectDetails';
 import Products from './pages/Products';
+import ProductDetail from './pages/ProductDetail';
 import Recipes from './pages/Recipes';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
@@ -75,6 +76,14 @@ const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <Products />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/products/detail/:id"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <ProductDetail />
               </ProtectedRoute>
             }
           />

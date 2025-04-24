@@ -26,7 +26,7 @@ def sanitize_for_json(obj: Any) -> Any:
     else:
         return obj
 
-MAX_CHUNK_SIZE = 7000  # tokens approximation for each chunk (prompt + context should not exceed 32k)
+MAX_CHUNK_SIZE = 250000  # tokens approximation for each chunk (prompt + context should not exceed 32k)
 
 async def get_gemini_response(
     prompt_content: str,
@@ -42,40 +42,30 @@ async def get_gemini_response(
     try:
         sanitized_data = sanitize_for_json(input_data)
 
-        # --- Build base prompt ---
+        # --- Build single prompt ---
         base_prompt = prompt_content.strip() + "\n\n---\n\n"
-        context_parts = []
+        prompt_body = ""
 
         if "product_data" in sanitized_data:
-            context_parts.append(("**Product Data:**", sanitized_data["product_data"]))
+            prompt_body += "**Product Data:**\n" + json.dumps(sanitized_data["product_data"], indent=2) + "\n\n"
 
         if "analyses" in sanitized_data:
-            context_parts.append(("**Analyses:**", sanitized_data["analyses"]))
+            prompt_body += "**Analyses:**\n" + json.dumps(sanitized_data["analyses"], indent=2) + "\n\n"
 
         if "product_success_recipes" in sanitized_data:
-            context_parts.append(("**Product Success Recipes:**", sanitized_data["product_success_recipes"]))
+            prompt_body += "**Product Success Recipes:**\n" + json.dumps(sanitized_data["product_success_recipes"], indent=2) + "\n\n"
 
         if "category" in sanitized_data or "subcategory" in sanitized_data:
-            category_context = f"Category: {sanitized_data.get('category', '')}\n"
-            category_context += f"Subcategory: {sanitized_data.get('subcategory', '')}\n"
-            context_parts.append(("**Category Context:**", category_context))
+            prompt_body += "**Category Context:**\n"
+            prompt_body += f"Category: {sanitized_data.get('category', '')}\n"
+            prompt_body += f"Subcategory: {sanitized_data.get('subcategory', '')}\n\n"
 
-        # Combine all context into JSON chunks
-        full_prompt_chunks = []
-        current_chunk = base_prompt
-        for label, content in context_parts:
-            serialized = json.dumps(content, indent=2) if isinstance(content, (dict, list)) else content
-            section = f"{label}\n{serialized}\n\n"
+        final_prompt = base_prompt + prompt_body
 
-            if len(current_chunk) + len(section) > MAX_CHUNK_SIZE:
-                full_prompt_chunks.append(current_chunk)
-                current_chunk = base_prompt + section
-            else:
-                current_chunk += section
+        if len(final_prompt) > MAX_CHUNK_SIZE:
+            logging.warning("Final prompt exceeds recommended length. Consider trimming data.")
 
-        full_prompt_chunks.append(current_chunk)
-
-        # --- Send chunks and collect responses ---
+        # --- Send to Gemini ---
         model = genai.GenerativeModel(settings.MODEL_NAME)
         generation_config = {
             "temperature": temperature,
@@ -85,28 +75,19 @@ async def get_gemini_response(
         }
 
         start_time = time.time()
-        complete_response = ""
-        for chunk in full_prompt_chunks:
-            response: GenerateContentResponse = model.generate_content(
-                chunk, generation_config=generation_config
-            )
-
-            # Avoid crashing on empty response
-            try:
-                if hasattr(response, 'text') and response.text:
-                    complete_response += response.text.strip() + "\n\n"
-                elif hasattr(response, 'candidates') and response.candidates:
-                    # fallback if `.text` is missing
-                    complete_response += response.candidates[0].content.parts[0].text.strip() + "\n\n"
-                else:
-                    logging.warning("Gemini response was empty for chunk.")
-                    continue
-            except Exception as inner_err:
-                logging.error(f"Error parsing Gemini response chunk: {inner_err}")
-
+        response = model.generate_content(final_prompt, generation_config=generation_config)
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # --- Logging ---
+        # Extract text
+        if hasattr(response, "text") and response.text:
+            complete_response = response.text.strip()
+        elif hasattr(response, "candidates") and response.candidates:
+            complete_response = response.candidates[0].content.parts[0].text.strip()
+        else:
+            complete_response = ""
+            logging.warning("Empty response received from Gemini.")
+
+        # --- Log if needed ---
         if user_id:
             log_collection = get_collection(MongoDBCollections.LOGS)
             await log_collection.insert_one({
@@ -114,7 +95,7 @@ async def get_gemini_response(
                 "project_id": project_id,
                 "prompt_id": prompt_id,
                 "prompt_content": prompt_content,
-                "final_prompt_sent": full_prompt_chunks,
+                "final_prompt_sent": final_prompt,
                 "input_data": sanitized_data,
                 "output": complete_response,
                 "model": settings.MODEL_NAME,
@@ -124,7 +105,7 @@ async def get_gemini_response(
 
         return {
             "success": True,
-            "response": complete_response.strip(),
+            "response": complete_response,
             "duration_ms": duration_ms,
             "model": settings.MODEL_NAME,
         }
@@ -136,6 +117,116 @@ async def get_gemini_response(
             "error": str(e),
             "model": settings.MODEL_NAME,
         }
+
+
+# async def get_gemini_response(
+#     prompt_content: str,
+#     input_data: Dict[str, Any],
+#     prompt_id: Optional[str] = None,
+#     project_id: Optional[str] = None,
+#     user_id: Optional[str] = None,
+#     temperature: float = 0.7,
+#     max_output_tokens: int = 2048,
+#     top_p: float = 0.95,
+#     top_k: int = 40,
+# ) -> Dict[str, Any]:
+#     try:
+#         sanitized_data = sanitize_for_json(input_data)
+
+#         # --- Build base prompt ---
+#         base_prompt = prompt_content.strip() + "\n\n---\n\n"
+#         context_parts = []
+
+#         if "product_data" in sanitized_data:
+#             context_parts.append(("**Product Data:**", sanitized_data["product_data"]))
+
+#         if "analyses" in sanitized_data:
+#             context_parts.append(("**Analyses:**", sanitized_data["analyses"]))
+
+#         if "product_success_recipes" in sanitized_data:
+#             context_parts.append(("**Product Success Recipes:**", sanitized_data["product_success_recipes"]))
+
+#         if "category" in sanitized_data or "subcategory" in sanitized_data:
+#             category_context = f"Category: {sanitized_data.get('category', '')}\n"
+#             category_context += f"Subcategory: {sanitized_data.get('subcategory', '')}\n"
+#             context_parts.append(("**Category Context:**", category_context))
+
+#         # Combine all context into JSON chunks
+#         full_prompt_chunks = []
+#         current_chunk = base_prompt
+#         for label, content in context_parts:
+#             serialized = json.dumps(content, indent=2) if isinstance(content, (dict, list)) else content
+#             section = f"{label}\n{serialized}\n\n"
+
+#             if len(current_chunk) + len(section) > MAX_CHUNK_SIZE:
+#                 full_prompt_chunks.append(current_chunk)
+#                 current_chunk = base_prompt + section
+#             else:
+#                 current_chunk += section
+
+#         full_prompt_chunks.append(current_chunk)
+
+#         # --- Send chunks and collect responses ---
+#         model = genai.GenerativeModel(settings.MODEL_NAME)
+#         generation_config = {
+#             "temperature": temperature,
+#             "top_p": top_p,
+#             "top_k": top_k,
+#             "max_output_tokens": max_output_tokens,
+#         }
+
+#         start_time = time.time()
+#         complete_response = ""
+#         for chunk in full_prompt_chunks:
+#             response: GenerateContentResponse = model.generate_content(
+#                 chunk, generation_config=generation_config
+#             )
+
+#             # Avoid crashing on empty response
+#             try:
+#                 if hasattr(response, 'text') and response.text:
+#                     complete_response += response.text.strip() + "\n\n"
+#                 elif hasattr(response, 'candidates') and response.candidates:
+#                     # fallback if `.text` is missing
+#                     complete_response += response.candidates[0].content.parts[0].text.strip() + "\n\n"
+#                 else:
+#                     logging.warning("Gemini response was empty for chunk.")
+#                     continue
+#             except Exception as inner_err:
+#                 logging.error(f"Error parsing Gemini response chunk: {inner_err}")
+
+#         duration_ms = int((time.time() - start_time) * 1000)
+
+#         # --- Logging ---
+#         if user_id:
+#             log_collection = get_collection(MongoDBCollections.LOGS)
+#             await log_collection.insert_one({
+#                 "user_id": user_id,
+#                 "project_id": project_id,
+#                 "prompt_id": prompt_id,
+#                 "prompt_content": prompt_content,
+#                 "final_prompt_sent": full_prompt_chunks,
+#                 "input_data": sanitized_data,
+#                 "output": complete_response,
+#                 "model": settings.MODEL_NAME,
+#                 "duration_ms": duration_ms,
+#                 "created_at": time.time(),
+#             })
+
+#         return {
+#             "success": True,
+#             "response": complete_response.strip(),
+#             "duration_ms": duration_ms,
+#             "model": settings.MODEL_NAME,
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error calling Gemini API: {e}")
+#         return {
+#             "success": False,
+#             "error": str(e),
+#             "model": settings.MODEL_NAME,
+#         }
 
 # async def get_gemini_response(
 #     prompt_content: str,
@@ -379,6 +470,16 @@ async def use_stored_prompt(
                 "error": f"Prompt with ID {prompt_id} not found",
             }
         complete_prompt = f"'{prompt['output_example']}' and here is the prompt: '{prompt['input_prompt']}'" 
+    
+    print(f"Complete prompt: {complete_prompt}")
+    print(await get_gemini_response(
+        prompt_content=complete_prompt,
+        input_data=input_data,
+        prompt_id=prompt_id,
+        project_id=project_id,
+        user_id=user_id,
+    ))
+
     # Call Gemini with the prompt
     return await get_gemini_response(
         prompt_content=complete_prompt,

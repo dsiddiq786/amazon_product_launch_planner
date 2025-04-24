@@ -17,28 +17,21 @@
 body {
     width: 400px;
     min-height: 500px;
-    overflow-y: auto;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    color: var(--text-primary);
-    background-color: #f9fafb;
+    margin: 0;
+    padding: 16px;
+    font-family: 'Inter', sans-serif;
 }
 
 /* Container and Layout */
 .container {
-    padding: 1.5rem;
+    max-width: 100%;
 }
 
 /* Cards and Sections */
 .card {
-    background-color: white;
-    border-radius: 0.75rem;
-    box-shadow: var(--shadow-sm);
-    transition: var(--transition);
-    border: 1px solid var(--border-color);
-}
-
-.card:hover {
-    box-shadow: var(--shadow-md);
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* Typography */
@@ -60,156 +53,88 @@ h3 {
 /* Forms and Inputs */
 input, select {
     width: 100%;
-    padding: 0.625rem 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    transition: var(--transition);
-    background-color: white;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    margin-top: 4px;
 }
 
 input:focus, select:focus {
     outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
 label {
-    display: block;
-    font-size: 0.875rem;
+    font-size: 14px;
     font-weight: 500;
-    color: var(--text-secondary);
-    margin-bottom: 0.5rem;
+    color: #374151;
 }
 
 /* Buttons */
 .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.625rem 1rem;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
+    padding: 8px 16px;
+    border-radius: 6px;
     font-weight: 500;
-    transition: var(--transition);
     cursor: pointer;
-    border: none;
+    transition: all 0.2s;
 }
 
 .btn-primary {
-    background-color: var(--primary-color);
+    background: #2563eb;
     color: white;
+    border: none;
 }
 
 .btn-primary:hover {
-    background-color: var(--primary-hover);
+    background: #1d4ed8;
 }
 
 .btn-secondary {
-    background-color: var(--secondary-color);
-    color: var(--text-primary);
+    background: #e5e7eb;
+    color: #374151;
+    border: none;
 }
 
 .btn-secondary:hover {
-    background-color: var(--secondary-hover);
+    background: #d1d5db;
 }
 
 /* User Info Section */
 .user-info {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 0.75rem;
-    background-color: white;
-    border-radius: 0.75rem;
-    margin-bottom: 1rem;
-    box-shadow: var(--shadow-sm);
+    align-items: center;
+    margin-bottom: 16px;
 }
 
 .user-avatar {
-    width: 2rem;
-    height: 2rem;
-    border-radius: 9999px;
-    background-color: var(--primary-color);
+    width: 32px;
+    height: 32px;
+    background: #2563eb;
     color: white;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 /* Status Messages */
 .status-message {
-    padding: 0.75rem;
-    border-radius: 0.5rem;
-    margin-bottom: 1rem;
-    font-size: 0.875rem;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    text-align: center;
 }
 
-.status-success {
-    background-color: #ecfdf5;
-    color: var(--success-color);
-    border: 1px solid #a7f3d0;
-}
-
-.status-error {
-    background-color: #fef2f2;
-    color: var(--error-color);
-    border: 1px solid #fecaca;
+.status-message.error {
+    background: #fee2e2;
+    color: #dc2626;
 }
 
 /* Product Info */
-.product-info {
-    display: flex;
-    gap: 1rem;
-    padding: 1rem;
-}
-
-.product-image {
-    width: 6rem;
-    height: 6rem;
-    object-fit: contain;
-    border-radius: 0.5rem;
-    background-color: white;
-    padding: 0.5rem;
-    border: 1px solid var(--border-color);
-}
-
-.product-details {
-    flex: 1;
-}
-
-.product-title {
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-    font-size: 0.9rem;
-    line-height: 1.4;
-}
-
-.product-info-text {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin-bottom: 0.25rem;
-}
-
-.product-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-}
-
-.product-price {
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.product-rating {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    color: #f59e0b;
-}
+/* Removed product info styles as they're no longer needed */
 
 /* Rankings Column */
 .rankings-info {
@@ -427,4 +352,89 @@ label {
     font-size: 1.125rem;
     font-weight: 600;
     color: var(--text-primary);
+}
+
+/* Stats Ticker */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.stat-item {
+    background: #f3f4f6;
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 600;
+    color: #2563eb;
+    margin-bottom: 4px;
+}
+
+.stat-label {
+    font-size: 12px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Toggle Switch */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+}
+
+input:checked + .slider {
+    background-color: #2563eb;
+}
+
+input:focus + .slider {
+    box-shadow: 0 0 1px #2563eb;
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+.slider.round {
+    border-radius: 24px;
+}
+
+.slider.round:before {
+    border-radius: 50%;
 } 
