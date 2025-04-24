@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     ALGORITHM: str = "HS256"
-    CORS_ORIGINS: List[str] = ["*","http://161.97.151.50:3000"]
+    CORS_ORIGINS: List[str] = ["http://161.97.151.50:3000"]
     
     # PostgreSQL Database (for user auth, plans, admin panel)
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "localhost")
