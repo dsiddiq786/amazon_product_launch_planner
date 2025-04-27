@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { api } from '../utils/api';
+import api from '../utils/api';
 import { formatDate } from '../utils/date';
 
 interface Recipe {
@@ -143,8 +143,28 @@ const Recipes: React.FC = () => {
           });
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching recipe prompts:', err);
+      
+      // Enhanced error handling for prompts fetching
+      let errorMessage = 'Failed to fetch recipe prompts';
+      
+      if (err.response) {
+        console.error('Prompts response status:', err.response.status);
+        console.error('Prompts response data:', err.response.data);
+        
+        if (err.response.data?.detail) {
+          errorMessage = `Prompts error: ${err.response.data.detail}`;
+        }
+      } else if (err.request) {
+        console.error('No prompts response received:', err.request);
+        errorMessage = 'No response received from prompts server. Check your connection.';
+      } else {
+        console.error('Prompts request error:', err.message);
+        errorMessage = `Prompts request error: ${err.message}`;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoadingPrompts(false);
     }
@@ -263,9 +283,30 @@ const Recipes: React.FC = () => {
       setViewMode('single');
     } catch (err: any) {
       console.error('Error fetching single master recipe:', err);
-      // Set a user-friendly error message
-      setError(err.response?.data?.detail || 
-              `Failed to fetch single master recipe for ${category}/${subcategory}`);
+      
+      // Enhanced error handling with detailed information
+      let errorMessage = `Failed to fetch single master recipe for ${category}/${subcategory}`;
+      
+      if (err.response) {
+        console.error('Response status:', err.response.status);
+        console.error('Response data:', err.response.data);
+        
+        if (err.response.data?.detail) {
+          errorMessage = `Error (${err.response.status}): ${err.response.data.detail}`;
+        } else if (err.response.status) {
+          errorMessage = `Server error (${err.response.status}) when fetching recipe`;
+        }
+      } else if (err.request) {
+        // Request was made but no response received
+        console.error('No response received:', err.request);
+        errorMessage = 'No response received from server. Please check your connection.';
+      } else {
+        // Error setting up the request
+        console.error('Request error:', err.message);
+        errorMessage = `Request error: ${err.message}`;
+      }
+      
+      setError(errorMessage);
       
       // Reset view mode to grouped if we couldn't load the single recipe
       setViewMode('grouped');
@@ -678,8 +719,23 @@ const Recipes: React.FC = () => {
         </div>
 
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 flex justify-between items-center">
+            <div>{error}</div>
+            <button 
+              onClick={() => {
+                setError(null);
+                if (viewMode === 'grouped') {
+                  fetchRecipes();
+                } else if (viewMode === 'filtered' && selectedCategory) {
+                  handleCategoryClick(selectedCategory.category, selectedCategory.subcategory);
+                } else if (viewMode === 'single' && selectedCategory) {
+                  handleViewSingleRecipe(selectedCategory.category, selectedCategory.subcategory);
+                }
+              }}
+              className="bg-red-700 text-white px-3 py-1 rounded hover:bg-red-800 text-sm ml-4"
+            >
+              Retry
+            </button>
           </div>
         )}
 

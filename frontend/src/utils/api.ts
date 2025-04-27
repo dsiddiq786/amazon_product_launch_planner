@@ -1,9 +1,9 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://161.97.151.50:8000/api/v1';
+const API_URL = import.meta.env.VITE_API_URL || 'http://161.97.151.50:8080/api/v1';
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -23,26 +23,16 @@ api.interceptors.request.use(
   }
 );
 
-// Add a response interceptor to handle authentication errors
+// Add a response interceptor to handle token expiration
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    const originalRequest = error.config;
-    
-    // Handle 401 Unauthorized errors
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      
-      // Only handle 401 for protected routes
-      if (!['/login/json', '/auth/register'].includes(originalRequest.url)) {
-        localStorage.removeItem('token');
-        // Use window.location instead of navigate to ensure full page reload
-        window.location.href = '/login';
-      }
+  async (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
     }
-    
     return Promise.reject(error);
   }
 );
 
-export { api }; 
+export default api; 
