@@ -75,7 +75,7 @@ async def create_prompt_block(
         "rerun_on_existing": prompt_data.rerun_on_existing,
         "is_active": prompt_data.is_active if prompt_data.is_active is not None else True,
         "user_id": current_admin.id,
-        "master_recipe_prompt": prompt_data.master_recipe,
+        "master_recipe_prompt": prompt_data.master_recipe_prompt,
         "analyzed_products_count": 0,
         "limit": prompt_data.limit,
         "skip": prompt_data.skip,
