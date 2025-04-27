@@ -83,4 +83,6 @@ export const authService = {
   },
 };
 
+// Export as both default and named export for compatibility
+export { api };
 export default api; 

@@ -15,107 +15,107 @@ import ProductDetail from './pages/ProductDetail';
 import Recipes from './pages/Recipes';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
-import { useAuth } from './contexts/AuthContext';
 
-// Create a root route component to handle the redirection logic
-const RootRoute: React.FC = () => {
-  const { isAuthenticated } = useAuth();
-  return isAuthenticated ? <Navigate to="/dashboard" replace /> : <Home />;
+// Create a component for the AppRoutes
+const AppRoutes = () => {
+  return (
+    <Router>
+      <Routes>
+        {/* Root Route */}
+        <Route path="/" element={<Home />} />
+
+        {/* Public Routes */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/free-trial" element={<FreeTrial />} />
+
+        {/* Base Protected Routes (Available to all authenticated users) */}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/projects"
+          element={
+            <ProtectedRoute>
+              <Projects />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/projects/:id"
+          element={
+            <ProtectedRoute>
+              <ProjectDetails />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Admin Only Routes */}
+        <Route
+          path="/prompts"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <Prompts />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/products"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <Products />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/products/detail/:id"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <ProductDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/recipes"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <Recipes />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <Users />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+        
+        {/* Catch-all Route */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
+  );
 };
 
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <Router>
-        <Routes>
-          {/* Root Route */}
-          <Route path="/" element={<RootRoute />} />
-
-          {/* Public Routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/free-trial" element={<FreeTrial />} />
-
-          {/* Base Protected Routes (Available to all authenticated users) */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects"
-            element={
-              <ProtectedRoute>
-                <Projects />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:id"
-            element={
-              <ProtectedRoute>
-                <ProjectDetails />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Admin Only Routes */}
-          <Route
-            path="/prompts"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Prompts />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/products"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Products />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/products/detail/:id"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <ProductDetail />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/recipes"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Recipes />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/users"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Users />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Settings />
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* Catch-all Route */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Router>
+      <AppRoutes />
     </AuthProvider>
   );
 };
