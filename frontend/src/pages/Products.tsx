@@ -118,13 +118,23 @@ const Products: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
+    if (window.confirm('Are you sure you want to delete this product? This will also delete all related analysis and logs.')) {
       try {
+        setLoading(true);
         await api.delete(`/products/${id}`);
-        fetchProducts();
-      } catch (err) {
-        setError('Failed to delete product');
+        // Show success message
+        setError(null);
+        // Refresh the products list
+        await fetchProducts();
+      } catch (err: any) {
+        let errorMessage = 'Failed to delete product';
+        if (err.response?.data?.detail) {
+          errorMessage = err.response.data.detail;
+        }
+        setError(errorMessage);
         console.error('Error deleting product:', err);
+      } finally {
+        setLoading(false);
       }
     }
   };

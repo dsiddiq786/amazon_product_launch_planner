@@ -352,27 +352,49 @@ async def get_product(
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product(
     product_id: str,
+
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Delete product
+    Delete a product and its related analysis and logs
     """
+    # Get collections
     products_collection = get_collection(MongoDBCollections.PRODUCTS)
+    analysis_collection = get_collection(MongoDBCollections.ANALYSIS)
+    logs_collection = get_collection(MongoDBCollections.LOGS)
+    analysis_tasks_collection = get_collection(MongoDBCollections.ANALYSIS_TASKS)
+
+    # Check if product exists and belongs to the user
     
-    # Check if product exists and belongs to user
-    product = await products_collection.find_one({
-        "id": product_id,
-        "user_id": current_user.id
-    })
+    if not product and current_user.role == UserRole.ADMIN:
+        product = await products_collection.find_one({
+            "id": product_id
+        })
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found"
         )
-    
-    # Delete product
-    await products_collection.delete_one({"id": product_id})
-    # No return value for 204 response
+
+    try:
+        # Delete the product
+        await products_collection.delete_one({"id": product_id})
+        
+        # Delete related analysis
+        await analysis_collection.delete_many({"product_id": product_id})
+        
+        # Delete related logs
+        await logs_collection.delete_many({"product_id": product_id})
+        
+        # Delete related analysis tasks
+        await analysis_tasks_collection.delete_many({"product_id": product_id})
+        
+        return {"message": "Product and related data deleted successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete product and related data: {str(e)}"
+        )
 
 
 @router.post("/{product_id}/analyze", response_model=Dict[str, Any])

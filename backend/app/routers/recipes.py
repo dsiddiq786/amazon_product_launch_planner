@@ -408,39 +408,72 @@ async def delete_recipe(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Delete recipe
+    Delete a recipe and its related analysis and logs for the specific category and subcategory
     """
+    # Get collections
     recipes_collection = get_collection(MongoDBCollections.RECIPES)
     master_recipes_collection = get_collection(MongoDBCollections.MASTER_RECIPES)
+    analysis_collection = get_collection(MongoDBCollections.ANALYSIS)
+    logs_collection = get_collection(MongoDBCollections.LOGS)
+    analysis_tasks_collection = get_collection(MongoDBCollections.ANALYSIS_TASKS)
+
+    # First check if it's a regular recipe
+    recipe = await recipes_collection.find_one({
+        "id": recipe_id,
+        # "user_id": current_user.id
+    })
     
-    # Check in regular recipes collection first
-    recipe = await recipes_collection.find_one({"id": recipe_id})
-    is_master = False
-    
-    if not recipe:
-        # If not found, check master recipes collection
-        recipe = await master_recipes_collection.find_one({"id": recipe_id})
-        is_master = True
+    # If not found, check if it's a master recipe
+    if not recipe and current_user.role == UserRole.ADMIN:
+        recipe = await master_recipes_collection.find_one({
+            "id": recipe_id,
+            # "user_id": current_user.id
+        })
+        if recipe:
+            recipes_collection = master_recipes_collection
     
     if not recipe:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Recipe not found"
         )
-    
-    # Only recipe owner or admin can delete
-    if current_user.role != UserRole.ADMIN and recipe["user_id"] != current_user.id:
+
+    try:
+        # Get the category and subcategory before deleting the recipe
+        category = recipe.get("category")
+        subcategory = recipe.get("subcategory")
+        
+        # Delete the recipe
+        await recipes_collection.delete_many({"category": category, "subcategory": subcategory})
+        
+        # Delete related analysis for this category and subcategory
+        if category and subcategory:
+            await analysis_collection.delete_many({
+                "category": category,
+                "subcategory": subcategory,
+                "user_id": current_user.id
+            })
+            
+            # Delete related logs for this category and subcategory
+            await logs_collection.delete_many({
+                "category": category,
+                "subcategory": subcategory,
+                "user_id": current_user.id
+            })
+            
+            # Delete related analysis tasks for this category and subcategory
+            await analysis_tasks_collection.delete_many({
+                "category": category,
+                "subcategory": subcategory,
+                "user_id": current_user.id
+            })
+        
+        return {"message": "Recipe and related data deleted successfully"}
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete recipe and related data: {str(e)}"
         )
-    
-    # Delete from correct collection
-    if is_master:
-        await master_recipes_collection.delete_one({"id": recipe_id})
-    else:
-        await recipes_collection.delete_one({"id": recipe_id})
-    # No return value for 204 response
 
 
 @router.post("/generate-master", response_model=Recipe)

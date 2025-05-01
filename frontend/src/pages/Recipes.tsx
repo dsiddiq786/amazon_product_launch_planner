@@ -216,16 +216,27 @@ const Recipes: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this recipe?')) {
+    if (window.confirm('Are you sure you want to delete this recipe? This will also delete all related analysis and logs for this category and subcategory.')) {
       try {
+        setLoading(true);
         await api.delete(`/recipes/${id}`);
-        fetchRecipes();
+        // Show success message
+        setError(null);
+        // Refresh the recipes list
+        await fetchRecipes();
+        // If in filtered view, update the filtered recipes
         if (viewMode === 'filtered') {
           setFilteredRecipes(prev => prev.filter(recipe => recipe.id !== id));
         }
-      } catch (err) {
-        setError('Failed to delete recipe');
+      } catch (err: any) {
+        let errorMessage = 'Failed to delete recipe';
+        if (err.response?.data?.detail) {
+          errorMessage = err.response.data.detail;
+        }
+        setError(errorMessage);
         console.error('Error deleting recipe:', err);
+      } finally {
+        setLoading(false);
       }
     }
   };

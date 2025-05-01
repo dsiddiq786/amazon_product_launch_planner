@@ -391,7 +391,7 @@ async def create_master_recipe(block: Dict[str, Any], category: str, subcategory
     )
 
     if result.get("success") and result.get("response"):
-        if len(result["response"]) < 200:
+        if len(result["response"]) < 400:
             print(f"Result is too short, rerunning master recipe prompt {block['id']}")
             result = await use_stored_prompt(
                 prompt_id=block["id"],
