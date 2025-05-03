@@ -352,7 +352,6 @@ async def get_product(
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product(
     product_id: str,
-
     current_user: User = Depends(get_current_active_user)
 ):
     """
@@ -364,12 +363,17 @@ async def delete_product(
     logs_collection = get_collection(MongoDBCollections.LOGS)
     analysis_tasks_collection = get_collection(MongoDBCollections.ANALYSIS_TASKS)
 
-    # Check if product exists and belongs to the user
-    
+    # Try to find product based on user role
+    product = await products_collection.find_one({
+        "id": product_id,
+        "user_id": current_user.id
+    })
+
     if not product and current_user.role == UserRole.ADMIN:
         product = await products_collection.find_one({
             "id": product_id
         })
+
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -395,6 +399,7 @@ async def delete_product(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete product and related data: {str(e)}"
         )
+
 
 
 @router.post("/{product_id}/analyze", response_model=Dict[str, Any])
